@@ -1,5 +1,5 @@
 import { X, Check } from 'lucide-react'
-import { Suggestion } from '../types/supabase'
+import { Suggestion } from '../services/aiService'
 
 interface SuggestionTooltipProps {
   suggestion: Suggestion

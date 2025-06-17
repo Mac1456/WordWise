@@ -15,7 +15,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          supabase: ['@supabase/supabase-js'],
           ui: ['lucide-react', 'react-hot-toast']
         }
       }
@@ -26,6 +25,6 @@ export default defineConfig({
     open: true
   },
   optimizeDeps: {
-    include: ['@supabase/supabase-js', 'uuid']
+    include: ['uuid']
   }
 }) 

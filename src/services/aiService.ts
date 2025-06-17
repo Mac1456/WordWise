@@ -1,6 +1,31 @@
-import { supabase } from '../lib/supabase'
-import { Suggestion, AnalysisResult } from '../types/supabase'
 import { v4 as uuidv4 } from 'uuid'
+
+// Local type definitions (moved from supabase types)
+export interface Suggestion {
+  id: string
+  type: 'grammar' | 'style' | 'vocabulary' | 'clarity' | 'goal-alignment'
+  severity: 'high' | 'medium' | 'low'
+  message: string
+  originalText: string
+  suggestedText: string
+  explanation: string
+  startIndex: number
+  endIndex: number
+  category: string
+  confidence: number
+}
+
+export interface AnalysisResult {
+  id: string
+  type: 'tone' | 'readability' | 'goal-alignment' | 'overall'
+  score: number
+  level: string
+  insights: string[]
+  recommendations: string[]
+  metrics: {
+    [key: string]: number | string
+  }
+}
 
 interface AnalysisRequest {
   content: string
@@ -22,19 +47,15 @@ interface SuggestionResponse {
 export class AIService {
   /**
    * Analyze text content and return suggestions and analysis results
+   * Note: Using fallback analysis since Firebase doesn't have edge functions like Supabase
    */
   static async analyzeText(request: AnalysisRequest): Promise<SuggestionResponse> {
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-text', {
-        body: request
-      })
-
-      if (error) throw error
-
-      return data as SuggestionResponse
+      // For Firebase setup, we use the fallback analysis
+      // In the future, this could be replaced with Firebase Functions or external AI APIs
+      return this.fallbackAnalysis(request)
     } catch (error) {
       console.error('AI analysis failed:', error)
-      // Fallback to rule-based analysis
       return this.fallbackAnalysis(request)
     }
   }
@@ -44,12 +65,8 @@ export class AIService {
    */
   static async getGrammarSuggestions(content: string, documentId: string): Promise<Suggestion[]> {
     try {
-      const { data, error } = await supabase.functions.invoke('grammar-check', {
-        body: { content, documentId }
-      })
-
-      if (error) throw error
-      return data.suggestions || []
+      // Using fallback for Firebase setup
+      return this.getFallbackGrammarSuggestions(content, documentId)
     } catch (error) {
       console.error('Grammar check failed:', error)
       return this.getFallbackGrammarSuggestions(content, documentId)
@@ -61,12 +78,8 @@ export class AIService {
    */
   static async analyzeTone(content: string, documentId: string, writingGoal: string): Promise<AnalysisResult> {
     try {
-      const { data, error } = await supabase.functions.invoke('tone-analysis', {
-        body: { content, documentId, writingGoal }
-      })
-
-      if (error) throw error
-      return data as AnalysisResult
+      // Using fallback for Firebase setup
+      return this.fallbackToneAnalysis(content, documentId)
     } catch (error) {
       console.error('Tone analysis failed:', error)
       return this.fallbackToneAnalysis(content, documentId)
@@ -78,12 +91,8 @@ export class AIService {
    */
   static async getVocabularySuggestions(content: string, documentId: string): Promise<Suggestion[]> {
     try {
-      const { data, error } = await supabase.functions.invoke('vocabulary-enhancement', {
-        body: { content, documentId }
-      })
-
-      if (error) throw error
-      return data.suggestions || []
+      // Using fallback for Firebase setup
+      return this.getFallbackVocabularySuggestions(content, documentId)
     } catch (error) {
       console.error('Vocabulary analysis failed:', error)
       return this.getFallbackVocabularySuggestions(content, documentId)
@@ -98,12 +107,8 @@ export class AIService {
     analysisResult: AnalysisResult
   }> {
     try {
-      const { data, error } = await supabase.functions.invoke('clarity-analysis', {
-        body: { content, documentId, wordLimit }
-      })
-
-      if (error) throw error
-      return data
+      // Using fallback for Firebase setup
+      return this.fallbackClarityAnalysis(content, documentId, wordLimit)
     } catch (error) {
       console.error('Clarity analysis failed:', error)
       return this.fallbackClarityAnalysis(content, documentId, wordLimit)
@@ -124,12 +129,8 @@ export class AIService {
     alignmentScore: number
   }> {
     try {
-      const { data, error } = await supabase.functions.invoke('goal-alignment', {
-        body: { content, documentId, writingGoal, specificGoals }
-      })
-
-      if (error) throw error
-      return data
+      // Using fallback for Firebase setup
+      return this.fallbackGoalAlignment(content, documentId, writingGoal)
     } catch (error) {
       console.error('Goal alignment check failed:', error)
       return this.fallbackGoalAlignment(content, documentId, writingGoal)
@@ -145,12 +146,8 @@ export class AIService {
     suggestions: string[]
   }> {
     try {
-      const { data, error } = await supabase.functions.invoke('readability-analysis', {
-        body: { content }
-      })
-
-      if (error) throw error
-      return data
+      // Using fallback for Firebase setup
+      return this.fallbackReadabilityAnalysis(content)
     } catch (error) {
       console.error('Readability analysis failed:', error)
       return this.fallbackReadabilityAnalysis(content)
@@ -159,23 +156,17 @@ export class AIService {
 
   /**
    * Save suggestion feedback for ML improvement
+   * Note: This would need to be implemented with Firebase Firestore
    */
   static async saveSuggestionFeedback(
     suggestionId: string,
     feedback: { helpful: boolean; comments?: string }
   ): Promise<void> {
     try {
-      const { error } = await supabase
-        .from('suggestions')
-        .update({
-          feedback,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', suggestionId)
-
-      if (error) throw error
-
-      // Also log analytics
+      // TODO: Implement with Firebase Firestore when needed
+      console.log('Suggestion feedback saved locally:', { suggestionId, feedback })
+      
+      // Log analytics locally for now
       await this.logAnalyticsEvent('suggestion_feedback', {
         suggestionId,
         feedback
@@ -187,19 +178,14 @@ export class AIService {
 
   /**
    * Log analytics events
+   * Note: This would need to be implemented with Firebase Analytics
    */
   static async logAnalyticsEvent(eventType: string, eventData: any): Promise<void> {
     try {
-      const user = (await supabase.auth.getUser()).data.user
-      if (!user) return
-
-      await supabase.from('analytics').insert({
-        user_id: user.id,
-        event_type: eventType,
-        event_data: eventData
-      })
+      // TODO: Implement with Firebase Analytics when needed
+      console.log('Analytics event logged locally:', { eventType, eventData })
     } catch (error) {
-      console.error('Failed to log analytics:', error)
+      console.error('Failed to log analytics event:', error)
     }
   }
 

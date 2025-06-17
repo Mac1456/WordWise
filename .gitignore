@@ -91,4 +91,15 @@ coverage/
 .tern-port
 
 # Stores VSCode versions used for testing VSCode extensions
-.vscode-test 
+.vscode-test
+
+# Firebase
+firebase.json
+database.rules.json
+storage.rules
+
+# Custom config files
+src/firebase-config.ts
+.env
+.env.*
+!.env.example 

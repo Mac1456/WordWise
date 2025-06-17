@@ -1,7 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Toaster } from 'react-hot-toast'
-import { useAuthStore } from './stores/authStore'
+import { useFirebaseAuthStore } from './stores/firebaseAuthStore'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
@@ -10,11 +10,18 @@ import EditorPage from './pages/EditorPage'
 
 
 function App() {
-  const { initialize } = useAuthStore()
+  const { initialize } = useFirebaseAuthStore()
 
   useEffect(() => {
-    // Initialize authentication system (development mode aware)
-    initialize()
+    // Initialize Firebase authentication system
+    const unsubscribe = initialize()
+    
+    // Cleanup on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe()
+      }
+    }
   }, [initialize])
 
   return (

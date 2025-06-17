@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Heart, Brain, CheckCircle } from 'lucide-react'
-import { Document } from '../types/supabase'
+import { Document } from '../stores/documentStore'
 import { AIService } from '../services/aiService'
 
 interface ToneAnalysisProps {

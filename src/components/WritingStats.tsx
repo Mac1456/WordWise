@@ -1,5 +1,5 @@
 import { BarChart3, FileText, Clock, Target } from 'lucide-react'
-import { Document } from '../types/supabase'
+import { Document } from '../stores/documentStore'
 
 interface WritingStatsProps {
   document: Document

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
-import { useDocumentStore } from '../stores/documentStore'
-import { Document } from '../types/supabase'
+import { Link, useNavigate } from 'react-router-dom'
+import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
+import { useDocumentStore, Document } from '../stores/documentStore'
 import { PlusCircle, FileText, Calendar, BarChart3, Trash2, Edit } from 'lucide-react'
+import { isDevelopment } from '../lib/firebase'
 
 // Simple date formatting function to replace date-fns
 const formatDate = (date: Date) => {
@@ -15,15 +15,17 @@ const formatDate = (date: Date) => {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuthStore()
+  const navigate = useNavigate()
+  const { user, logout } = useFirebaseAuthStore()
   const { documents, loadDocuments, createDocument, deleteDocument, loading } = useDocumentStore()
   const [isCreating, setIsCreating] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
+  const [showUserMenu, setShowUserMenu] = useState(false)
 
   // Debug helper
   const checkLocalStorage = () => {
     if (user) {
-      const storageKey = `wordwise_documents_${user.id}`
+      const storageKey = `wordwise_documents_${user.uid}`
       const docs = localStorage.getItem(storageKey)
       console.log('LocalStorage contents:', docs)
       console.log('Current documents in state:', documents)
@@ -31,10 +33,8 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    if (user) {
-      loadDocuments()
-    }
-  }, [user, loadDocuments])
+    loadDocuments()
+  }, [loadDocuments])
 
   const handleCreateDocument = async () => {
     if (!user || !newDocTitle.trim()) {
@@ -42,7 +42,7 @@ export default function DashboardPage() {
       return
     }
     
-    console.log('Creating document:', { title: newDocTitle.trim(), userId: user.id })
+    console.log('Creating document:', { title: newDocTitle.trim(), userId: user.uid })
     setIsCreating(true)
     try {
       const docId = await createDocument(newDocTitle.trim(), 'personal-statement')
@@ -87,7 +87,7 @@ export default function DashboardPage() {
           Organize and manage your personal statements and essays in one place.
         </p>
         {/* Development Mode Indicator */}
-        {(!import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) && (
+        {isDevelopment && (
           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center space-x-2">
               <span className="text-blue-600">🔧</span>

@@ -1,29 +1,32 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
-import { PenTool, Mail, Lock, AlertCircle, CheckCircle, User } from 'lucide-react'
+import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
+import { PenTool, Mail, Lock, User, AlertCircle } from 'lucide-react'
 
 export default function SignupPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [fullName, setFullName] = useState('')
+  const [formData, setFormData] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: ''
+  })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   
-  const { register } = useAuthStore()
+  const { register } = useFirebaseAuthStore()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
-    if (password !== confirmPassword) {
+    // Validation
+    if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
       return
     }
 
-    if (password.length < 6) {
+    if (formData.password.length < 6) {
       setError('Password must be at least 6 characters')
       return
     }
@@ -31,7 +34,7 @@ export default function SignupPage() {
     setLoading(true)
 
     try {
-      await register(email, password, fullName.trim() || undefined)
+      await register(formData.email, formData.password, formData.fullName)
       navigate('/dashboard')
     } catch (err: any) {
       setError(err.message)
@@ -61,7 +64,7 @@ export default function SignupPage() {
         <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
           <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
             <div className="flex items-start">
-              <CheckCircle className="h-5 w-5 text-blue-500 mt-0.5" />
+              <User className="h-5 w-5 text-blue-500 mt-0.5" />
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-blue-800">What you'll get:</h3>
                 <ul className="mt-2 text-sm text-blue-700 space-y-1">
@@ -90,21 +93,22 @@ export default function SignupPage() {
               <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
                 Full Name
               </label>
-                             <div className="mt-1 relative">
-                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                   <User className="h-5 w-5 text-gray-400" />
-                 </div>
-                 <input
-                   id="fullName"
-                   name="fullName"
-                   type="text"
-                   autoComplete="name"
-                   className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                   placeholder="Enter your full name"
-                   value={fullName}
-                   onChange={(e) => setFullName(e.target.value)}
-                 />
-               </div>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <User className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="fullName"
+                  name="fullName"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                  placeholder="Enter your full name"
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                />
+              </div>
             </div>
 
             <div>
@@ -123,8 +127,8 @@ export default function SignupPage() {
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                   placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
             </div>
@@ -145,8 +149,8 @@ export default function SignupPage() {
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                   placeholder="Create a password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 />
               </div>
               <p className="mt-1 text-xs text-gray-500">Must be at least 6 characters</p>
@@ -168,8 +172,8 @@ export default function SignupPage() {
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                   placeholder="Confirm your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                 />
               </div>
             </div>
