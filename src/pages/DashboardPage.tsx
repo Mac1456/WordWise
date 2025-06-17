@@ -48,8 +48,9 @@ export default function DashboardPage() {
       const docId = await createDocument(newDocTitle.trim(), 'personal-statement')
       console.log('Document created successfully:', docId)
       setNewDocTitle('')
-      // Force reload documents after creation
-      await loadDocuments()
+      
+      // Redirect to the newly created document
+      navigate(`/editor/${docId}`)
     } catch (error) {
       console.error('Failed to create document:', error)
     } finally {
@@ -142,10 +143,21 @@ export default function DashboardPage() {
             <h3 className="text-lg font-medium text-gray-900 mb-2">No documents yet</h3>
             <p className="text-gray-500 mb-6">Create your first personal statement to get started with organized document management.</p>
             <button
-              onClick={() => setNewDocTitle('My Personal Statement')}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              onClick={async () => {
+                setIsCreating(true)
+                try {
+                  const docId = await createDocument('My Personal Statement', 'personal-statement')
+                  navigate(`/editor/${docId}`)
+                } catch (error) {
+                  console.error('Failed to create document:', error)
+                } finally {
+                  setIsCreating(false)
+                }
+              }}
+              disabled={isCreating}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Create Your First Document
+              {isCreating ? 'Creating...' : 'Create Your First Document'}
             </button>
           </div>
         ) : (

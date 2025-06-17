@@ -11,8 +11,7 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  where, 
-  orderBy 
+  where 
 } from 'firebase/firestore'
 
 // Define Document type locally
@@ -120,10 +119,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       } else {
         // Production mode: use Firebase Firestore
         console.log('Loading documents from Firebase Firestore')
+        
+        // Simple query without orderBy to avoid index requirement
         const q = query(
           collection(db, 'documents'),
-          where('userId', '==', user.uid),
-          orderBy('updatedAt', 'desc')
+          where('userId', '==', user.uid)
         )
         
         const querySnapshot = await getDocs(q)
@@ -132,7 +132,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         querySnapshot.forEach((doc) => {
           documents.push({ id: doc.id, ...doc.data() } as Document)
         })
-        
+
+        // Sort documents client-side by updatedAt (newest first)
+        documents.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+
         console.log('Loaded documents from Firestore:', documents)
         set({ documents, loading: false })
       }
@@ -150,6 +153,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         throw new Error('User not authenticated')
       }
 
+      console.log('Creating document with Firebase config. isDevelopment:', isDevelopment)
+
       if (isDevelopment) {
         // Development mode: use localStorage
         console.log('Development mode: Creating and saving document to localStorage')
@@ -160,6 +165,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           content: '',
           writingGoal: writingGoal as any,
           wordCount: 0,
+          readabilityScore: 0,
           status: 'draft',
           metadata: { wordLimit: writingGoal === 'personal-statement' ? 650 : 1000 },
           createdAt: new Date().toISOString(),
@@ -180,19 +186,23 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return newDocument.id
       } else {
         // Production mode: use Firebase Firestore
-        console.log('Creating document in Firebase Firestore')
+        console.log('Creating document in Firebase Firestore for user:', user.uid)
+        
         const newDocumentData = {
           userId: user.uid,
           title,
           content: '',
-          writingGoal: writingGoal as any,
+          writingGoal: writingGoal as Document['writingGoal'],
           wordCount: 0,
-          status: 'draft' as const,
+          readabilityScore: 0,
+          status: 'draft' as Document['status'],
           metadata: { wordLimit: writingGoal === 'personal-statement' ? 650 : 1000 },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }
 
+        console.log('Document data to be saved:', newDocumentData)
+        
         const docRef = await addDoc(collection(db, 'documents'), newDocumentData)
         const createdDoc: Document = { id: docRef.id, ...newDocumentData }
 
@@ -201,13 +211,23 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           currentDocument: createdDoc
         })
 
-        console.log('Document created in Firestore:', createdDoc)
+        console.log('Document created successfully in Firestore with ID:', docRef.id)
         toast.success('📄 Document created successfully!')
         return docRef.id
       }
     } catch (error: any) {
       console.error('Failed to create document:', error)
-      toast.error('Failed to create document')
+      console.error('Error details:', error.message)
+      console.error('Error code:', error.code)
+      
+      // Provide more specific error messages
+      if (error.code === 'permission-denied') {
+        toast.error('Permission denied. Please check Firestore security rules.')
+      } else if (error.code === 'unavailable') {
+        toast.error('Firestore is currently unavailable. Please try again.')
+      } else {
+        toast.error(`Failed to create document: ${error.message}`)
+      }
       throw error
     }
   },
