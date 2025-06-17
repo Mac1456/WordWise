@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .writing-editor {
+    @apply min-h-[400px] p-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+  
+  .suggestion-underline {
+    @apply border-b-2 border-red-400 cursor-pointer relative;
+  }
+  
+  .suggestion-tooltip {
+    @apply absolute z-10 p-2 bg-white border border-gray-200 rounded shadow-lg text-sm max-w-xs;
+  }
+} 
