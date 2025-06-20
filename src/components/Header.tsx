@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useFirebaseAuthStore } from '../stores/firebaseAuthStore';
-import { Book, User, LogOut, FileText, Settings, Menu, X, Sun, Moon } from 'lucide-react';
+import { Book, LogOut, FileText, Settings, Menu, Sun, Moon } from 'lucide-react';
 
 // A simple hook for detecting clicks outside an element
 function useOutsideAlerter(ref: React.RefObject<HTMLDivElement>, callback: () => void) {

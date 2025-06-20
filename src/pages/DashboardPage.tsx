@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
 import { useDocumentStore, Document } from '../stores/documentStore'
-import { Plus, FileText, Calendar, BarChart3, Trash2, Edit, ChevronRight, BookOpen, User, Settings } from 'lucide-react'
+import { Plus, Calendar, BarChart3, Trash2, ChevronRight, BookOpen } from 'lucide-react'
 import { isDevelopment } from '../lib/firebase'
 
 // Simple date formatting function to replace date-fns

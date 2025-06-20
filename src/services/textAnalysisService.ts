@@ -2118,7 +2118,8 @@ Suggest corrections to maintain consistent tone and voice.`;
         suggestedText: 'Use consistent verb tenses',
         startIndex: 0,
         endIndex: text.length,
-        explanation: 'Maintain consistent verb tense throughout your writing.'
+        explanation: 'Maintain consistent verb tense throughout your writing.',
+        confidence: 0.7
       });
     }
     
@@ -2151,7 +2152,8 @@ Suggest corrections to maintain consistent tone and voice.`;
           suggestedText: 'Vary sentence beginnings',
           startIndex: 0,
           endIndex: text.length,
-          explanation: 'Varying sentence beginnings improves flow and readability.'
+          explanation: 'Varying sentence beginnings improves flow and readability.',
+          confidence: 0.6
         });
       }
     });
@@ -2181,7 +2183,8 @@ Suggest corrections to maintain consistent tone and voice.`;
           suggestedText: 'Consider breaking into shorter sentences',
           startIndex,
           endIndex: startIndex + sentence.length,
-          explanation: 'Shorter sentences are generally easier to read and understand.'
+          explanation: 'Shorter sentences are generally easier to read and understand.',
+          confidence: 0.8
         });
       }
     });
