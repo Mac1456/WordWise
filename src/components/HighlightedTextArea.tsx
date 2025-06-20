@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { TextSuggestion } from '../services/textAnalysisService';
 
 interface HighlightedTextAreaProps {

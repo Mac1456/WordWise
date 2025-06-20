@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDocumentStore } from '../stores/documentStore'
 import { textAnalysisService, TextAnalysis, TextSuggestion } from '../services/textAnalysisService'
 import HighlightedTextArea from './HighlightedTextArea'
 import ToneAnalysisPanel from './ToneAnalysisPanel'
+import SuggestionTooltip from './SuggestionTooltip'
 import { 
   Save, 
   FileText, 
@@ -33,7 +34,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const [wordLimit, setWordLimit] = useState<number | null>(null)
   const [showToneAnalysis, setShowToneAnalysis] = useState(false)
   const [isRunningToneAnalysis, setIsRunningToneAnalysis] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Remove unused state - keeping for potential future use
+  // const [forceAIAnalysis, setForceAIAnalysis] = useState(false)
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     if (documentId && documents.length > 0) {
@@ -166,10 +169,29 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       content.substring(suggestion.endIndex)
     handleContentChange(newContent)
     setSelectedSuggestion(null)
+    
+    // Track suggestion acceptance for learning
+    console.log('Suggestion applied:', {
+      type: suggestion.type,
+      severity: suggestion.severity,
+      originalText: suggestion.originalText,
+      suggestedText: suggestion.suggestedText
+    })
   }
 
-  const dismissSuggestion = (suggestionId: string) => {
+  const dismissSuggestion = (suggestionId: string, helpful: boolean = false) => {
     if (analysis) {
+      const suggestion = analysis.suggestions.find(s => s.id === suggestionId)
+      if (suggestion) {
+        // Track suggestion feedback for learning
+        console.log('Suggestion dismissed:', {
+          type: suggestion.type,
+          severity: suggestion.severity,
+          helpful,
+          suggestionId
+        })
+      }
+      
       setAnalysis({
         ...analysis,
         suggestions: analysis.suggestions.filter(s => s.id !== suggestionId)
@@ -200,6 +222,26 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     }
   }
 
+  const handleManualAIAnalysis = async () => {
+    if (!content.trim() || content.trim().length < 20) {
+      alert('Please write at least 20 characters for AI analysis.')
+      return
+    }
+
+    setIsAnalyzing(true)
+    try {
+      const writingGoal = 'personal-statement'
+      const result = await textAnalysisService.analyzeText(content, writingGoal, false)
+      setAnalysis(result)
+      console.log('Manual AI analysis completed')
+    } catch (error) {
+      console.error('Manual AI analysis failed:', error)
+      alert('AI analysis failed. Please check your OpenAI API key and try again.')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   if (!currentDocument) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -215,7 +257,6 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const words = content.trim().split(/\s+/).filter(word => word.length > 0)
   const wordCount = analysis?.wordCount || words.length
   const characterCount = analysis?.characterCount || content.length
-  const characterCountNoSpaces = content.replace(/\s/g, '').length
   const sentences = analysis?.sentenceCount || content.split(/[.!?]+/).filter(s => s.trim().length > 0).length
 
   // Word limit progress
@@ -287,6 +328,14 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   >
                     <Save className="h-4 w-4 mr-1" />
                     {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={handleManualAIAnalysis}
+                    disabled={isAnalyzing || content.trim().length < 20}
+                    className="flex items-center px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Lightbulb className="h-4 w-4 mr-1" />
+                    {isAnalyzing ? 'Analyzing...' : 'AI Analysis'}
                   </button>
                   <button
                     onClick={handleToneAnalysis}
@@ -381,9 +430,19 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                 value={content}
                 onChange={handleContentChange}
                 suggestions={analysis?.suggestions || []}
-                onSuggestionClick={(suggestion) => setSelectedSuggestion(suggestion)}
+                onSuggestionClick={(suggestion) => {
+                  setSelectedSuggestion(suggestion)
+                  // Calculate tooltip position
+                  const rect = document.querySelector('.highlighted-text-area')?.getBoundingClientRect()
+                  if (rect) {
+                    setTooltipPosition({
+                      x: rect.left + suggestion.startIndex * 8, // Rough estimate based on character width
+                      y: rect.top + 50 // Position below the text
+                    })
+                  }
+                }}
                 placeholder="Start writing your essay here..."
-                className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-base leading-relaxed"
+                className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-base leading-relaxed highlighted-text-area"
               />
             </div>
 
@@ -768,6 +827,28 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         <ToneAnalysisPanel
           toneAnalysis={analysis.toneAnalysis}
           onClose={() => setShowToneAnalysis(false)}
+        />
+      )}
+
+      {/* Enhanced Suggestion Tooltip */}
+      {selectedSuggestion && tooltipPosition && (
+        <SuggestionTooltip
+          suggestion={selectedSuggestion}
+          position={tooltipPosition}
+          onApply={() => {
+            applySuggestion(selectedSuggestion)
+            setSelectedSuggestion(null)
+            setTooltipPosition(null)
+          }}
+          onClose={() => {
+            setSelectedSuggestion(null)
+            setTooltipPosition(null)
+          }}
+          onDismiss={() => {
+            dismissSuggestion(selectedSuggestion.id, false)
+            setSelectedSuggestion(null)
+            setTooltipPosition(null)
+          }}
         />
       )}
     </div>

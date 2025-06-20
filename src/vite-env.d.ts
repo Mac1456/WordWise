@@ -9,8 +9,8 @@ interface ImportMetaEnv {
   // readonly VITE_FIREBASE_MESSAGING_SENDER_ID: string
   // readonly VITE_FIREBASE_APP_ID: string
   
-  // Optional AI integration
-  readonly OPENAI_API_KEY?: string
+  // AI integration now handled securely via Firebase Cloud Functions
+  // No API keys needed in frontend environment
 }
 
 interface ImportMeta {

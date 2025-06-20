@@ -1,4 +1,3 @@
-import React from 'react';
 import { ToneAnalysis } from '../services/textAnalysisService';
 
 interface ToneAnalysisPanelProps {

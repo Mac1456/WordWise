@@ -63,55 +63,55 @@ export class AIService {
   /**
    * Get grammar and style suggestions
    */
-  static async getGrammarSuggestions(content: string, documentId: string): Promise<Suggestion[]> {
+  static async getGrammarSuggestions(content: string): Promise<Suggestion[]> {
     try {
       // Using fallback for Firebase setup
-      return this.getFallbackGrammarSuggestions(content, documentId)
+      return this.getFallbackGrammarSuggestions(content)
     } catch (error) {
       console.error('Grammar check failed:', error)
-      return this.getFallbackGrammarSuggestions(content, documentId)
+      return this.getFallbackGrammarSuggestions(content)
     }
   }
 
   /**
    * Analyze tone and emotional impact
    */
-  static async analyzeTone(content: string, documentId: string, writingGoal: string): Promise<AnalysisResult> {
+  static async analyzeTone(content: string): Promise<AnalysisResult> {
     try {
       // Using fallback for Firebase setup
-      return this.fallbackToneAnalysis(content, documentId)
+      return this.fallbackToneAnalysis(content)
     } catch (error) {
       console.error('Tone analysis failed:', error)
-      return this.fallbackToneAnalysis(content, documentId)
+      return this.fallbackToneAnalysis(content)
     }
   }
 
   /**
    * Get vocabulary enhancement suggestions
    */
-  static async getVocabularySuggestions(content: string, documentId: string): Promise<Suggestion[]> {
+  static async getVocabularySuggestions(content: string): Promise<Suggestion[]> {
     try {
       // Using fallback for Firebase setup
-      return this.getFallbackVocabularySuggestions(content, documentId)
+      return this.getFallbackVocabularySuggestions(content)
     } catch (error) {
       console.error('Vocabulary analysis failed:', error)
-      return this.getFallbackVocabularySuggestions(content, documentId)
+      return this.getFallbackVocabularySuggestions(content)
     }
   }
 
   /**
    * Analyze content for conciseness and clarity
    */
-  static async analyzeClarity(content: string, documentId: string, wordLimit?: number): Promise<{
+  static async analyzeClarity(content: string, wordLimit?: number): Promise<{
     suggestions: Suggestion[]
     analysisResult: AnalysisResult
   }> {
     try {
       // Using fallback for Firebase setup
-      return this.fallbackClarityAnalysis(content, documentId, wordLimit)
+      return this.fallbackClarityAnalysis(content, wordLimit)
     } catch (error) {
       console.error('Clarity analysis failed:', error)
-      return this.fallbackClarityAnalysis(content, documentId, wordLimit)
+      return this.fallbackClarityAnalysis(content, wordLimit)
     }
   }
 
@@ -119,10 +119,7 @@ export class AIService {
    * Check alignment with writing goals
    */
   static async checkGoalAlignment(
-    content: string, 
-    documentId: string, 
-    writingGoal: string,
-    specificGoals?: string[]
+    writingGoal: string
   ): Promise<{
     suggestions: Suggestion[]
     analysisResult: AnalysisResult
@@ -130,10 +127,10 @@ export class AIService {
   }> {
     try {
       // Using fallback for Firebase setup
-      return this.fallbackGoalAlignment(content, documentId, writingGoal)
+      return this.fallbackGoalAlignment(writingGoal)
     } catch (error) {
       console.error('Goal alignment check failed:', error)
-      return this.fallbackGoalAlignment(content, documentId, writingGoal)
+      return this.fallbackGoalAlignment(writingGoal)
     }
   }
 
@@ -192,47 +189,43 @@ export class AIService {
   // Fallback methods for when Edge Functions are unavailable
 
   private static fallbackAnalysis(request: AnalysisRequest): SuggestionResponse {
-    const { content, documentId } = request
+    const { content } = request
     const suggestions: Suggestion[] = []
     
     // Basic grammar patterns
-    const grammarSuggestions = this.getFallbackGrammarSuggestions(content, documentId)
+    const grammarSuggestions = this.getFallbackGrammarSuggestions(content)
     suggestions.push(...grammarSuggestions)
 
     // Basic vocabulary suggestions
-    const vocabSuggestions = this.getFallbackVocabularySuggestions(content, documentId)
+    const vocabSuggestions = this.getFallbackVocabularySuggestions(content)
     suggestions.push(...vocabSuggestions)
 
     // Create basic analysis result
     const analysisResult: AnalysisResult = {
       id: uuidv4(),
-      documentId,
-      userId: '', // Will be set by the store
-      type: 'grammar',
-      results: {
-        score: Math.min(100, Math.max(0, 100 - suggestions.length * 5)),
-        suggestions,
-        insights: [
-          `Found ${suggestions.length} potential improvements`,
-          'Consider reviewing the highlighted suggestions to enhance your writing'
-        ],
-        improvements: suggestions.map(s => s.explanation)
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      type: 'overall',
+      score: Math.min(100, Math.max(0, 100 - suggestions.length * 5)),
+      level: 'Good',
+      insights: [
+        `Found ${suggestions.length} potential improvements`,
+        'Consider reviewing the highlighted suggestions to enhance your writing'
+      ],
+      recommendations: suggestions.map(s => s.explanation),
+      metrics: {
+        suggestionCount: suggestions.length
+      }
     }
 
     return {
       suggestions,
       analysisResults: [analysisResult],
-      overallScore: analysisResult.results.score,
-      insights: analysisResult.results.insights
+      overallScore: analysisResult.score,
+      insights: analysisResult.insights
     }
   }
 
-  private static getFallbackGrammarSuggestions(content: string, documentId: string): Suggestion[] {
+  private static getFallbackGrammarSuggestions(content: string): Suggestion[] {
     const suggestions: Suggestion[] = []
-    const userId = '' // Will be set by the store
 
     // Common grammar patterns
     const patterns = [
@@ -253,64 +246,30 @@ export class AIService {
         type: 'style' as const,
         explanation: 'Consider stating your point directly for stronger impact',
         replacement: () => ''
+      },
+      {
+        regex: /\butilize\b/gi,
+        type: 'style' as const,
+        explanation: 'The word "utilize" can often be replaced with the simpler "use".',
+        replacement: 'use'
       }
     ]
 
-    patterns.forEach(pattern => {
-      let match
-      while ((match = pattern.regex.exec(content)) !== null) {
-        suggestions.push({
-          id: uuidv4(),
-          documentId,
-          userId,
-          type: pattern.type,
-          text: match[0],
-          replacement: pattern.replacement(match[0]),
-          explanation: pattern.explanation,
-          position: { start: match.index, end: match.index + match[0].length },
-          confidence: 0.7,
-          accepted: false,
-          dismissed: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        })
-      }
-    })
-
-    return suggestions
-  }
-
-  private static getFallbackVocabularySuggestions(content: string, documentId: string): Suggestion[] {
-    const suggestions: Suggestion[] = []
-    const userId = '' // Will be set by the store
-
-    const vocabularyReplacements = [
-      { word: 'good', replacements: ['excellent', 'outstanding', 'remarkable', 'exceptional'] },
-      { word: 'bad', replacements: ['poor', 'inadequate', 'substandard', 'disappointing'] },
-      { word: 'big', replacements: ['substantial', 'significant', 'considerable', 'extensive'] },
-      { word: 'small', replacements: ['minor', 'limited', 'modest', 'minimal'] },
-      { word: 'important', replacements: ['crucial', 'vital', 'essential', 'significant'] }
-    ]
-
-    vocabularyReplacements.forEach(({ word, replacements }) => {
-      const regex = new RegExp(`\\b${word}\\b`, 'gi')
+    patterns.forEach(({ regex, type, explanation, replacement }) => {
       let match
       while ((match = regex.exec(content)) !== null) {
-        const randomReplacement = replacements[Math.floor(Math.random() * replacements.length)]
         suggestions.push({
           id: uuidv4(),
-          documentId,
-          userId,
-          type: 'vocabulary',
-          text: match[0],
-          replacement: randomReplacement,
-          explanation: `Consider using "${randomReplacement}" for more precise language`,
-          position: { start: match.index, end: match.index + match[0].length },
-          confidence: 0.6,
-          accepted: false,
-          dismissed: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          type,
+          severity: 'low',
+          message: explanation,
+          originalText: match[0],
+          suggestedText: typeof replacement === 'function' ? replacement(match[0]) : replacement,
+          explanation,
+          startIndex: match.index,
+          endIndex: match.index + match[0].length,
+          category: 'style',
+          confidence: 0.8
         })
       }
     })
@@ -318,163 +277,103 @@ export class AIService {
     return suggestions
   }
 
-  private static fallbackToneAnalysis(content: string, documentId: string): AnalysisResult {
-    // Simple tone analysis based on word patterns
-    const personalWords = /\b(I|me|my|myself|personally)\b/gi
-    const formalWords = /\b(furthermore|moreover|consequently|nevertheless)\b/gi
-    const emotionalWords = /\b(passionate|excited|thrilled|inspired|determined)\b/gi
-    
-    const personalCount = (content.match(personalWords) || []).length
-    const formalCount = (content.match(formalWords) || []).length
-    const emotionalCount = (content.match(emotionalWords) || []).length
-    
-    const totalWords = content.split(/\s+/).length
-    const personalRatio = personalCount / totalWords
-    const formalRatio = formalCount / totalWords
-    const emotionalRatio = emotionalCount / totalWords
+  private static getFallbackVocabularySuggestions(content: string): Suggestion[] {
+    const suggestions: Suggestion[] = []
 
-    let tone = 'neutral'
-    let score = 70
-    const insights: string[] = []
+    const overusedWords = ['very', 'really', 'actually', 'just', 'stuff', 'things']
+    const wordRegex = new RegExp(`\\b(${overusedWords.join('|')})\\b`, 'gi')
+    
+    let match
+    while ((match = wordRegex.exec(content)) !== null) {
+      suggestions.push({
+        id: uuidv4(),
+        type: 'vocabulary',
+        severity: 'medium',
+        message: `"${match[0]}" is an overused word. Consider a more descriptive alternative.`,
+        originalText: match[0],
+        suggestedText: 'stronger word',
+        explanation: `The word "${match[0]}" can often be removed or replaced for stronger impact.`,
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+        category: 'vocabulary',
+        confidence: 0.7
+      })
+    }
+    
+    return suggestions
+  }
 
-    if (personalRatio > 0.05) {
-      tone = 'personal'
-      insights.push('Your writing has a personal tone, which is good for personal statements')
-    }
+  private static fallbackToneAnalysis(content: string): AnalysisResult {
+    const positiveWords = ['amazing', 'excellent', 'great', 'wonderful', 'fantastic', 'love'].length
+    const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'problem'].length
+
+    const positiveMatches = content.match(new RegExp(`\\b(${positiveWords})\\b`, 'gi'))?.length || 0
+    const negativeMatches = content.match(new RegExp(`\\b(${negativeWords})\\b`, 'gi'))?.length || 0
     
-    if (formalRatio > 0.02) {
-      tone = 'formal'
-      insights.push('Your writing maintains a formal tone')
-    }
-    
-    if (emotionalRatio > 0.03) {
-      insights.push('Your writing shows emotional engagement')
-      score += 10
-    }
+    let score = 50
+    if (positiveMatches > negativeMatches) score = 80
+    if (negativeMatches > positiveMatches) score = 20
 
     return {
       id: uuidv4(),
-      documentId,
-      userId: '',
       type: 'tone',
-      results: {
-        score,
-        suggestions: [],
-        insights,
-        improvements: [
-          `Tone analysis: ${tone}`,
-          `Personal language ratio: ${(personalRatio * 100).toFixed(1)}%`,
-          `Emotional engagement: ${(emotionalRatio * 100).toFixed(1)}%`
-        ]
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      score: score,
+      level: score > 60 ? 'Positive' : score < 40 ? 'Negative' : 'Neutral',
+      insights: [`Detected a mostly ${score > 60 ? 'positive' : 'neutral'} tone.`],
+      recommendations: ['Ensure the tone aligns with your intended audience.'],
+      metrics: {
+        positiveWords: positiveMatches,
+        negativeWords: negativeMatches
+      }
     }
   }
 
-  private static fallbackClarityAnalysis(content: string, documentId: string, wordLimit?: number): {
+  private static fallbackClarityAnalysis(content: string, wordLimit?: number): {
     suggestions: Suggestion[]
     analysisResult: AnalysisResult
   } {
-    const suggestions: Suggestion[] = []
-    const words = content.split(/\s+/)
-    const wordCount = words.length
-    
-    let score = 80
-    const insights: string[] = []
-    
-    // Word limit check
-    if (wordLimit && wordCount > wordLimit) {
-      const overageWords = wordCount - wordLimit
-      insights.push(`Your document exceeds the word limit by ${overageWords} words`)
-      score -= Math.min(30, overageWords / 10)
-    }
-    
-    // Average sentence length
-    const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 0)
-    const avgSentenceLength = wordCount / sentences.length
-    
-    if (avgSentenceLength > 25) {
-      insights.push('Consider breaking up long sentences for better readability')
-      score -= 10
-    }
-
+    const suggestions: Suggestion[] = this.getFallbackGrammarSuggestions(content)
     const analysisResult: AnalysisResult = {
       id: uuidv4(),
-      documentId,
-      userId: '',
       type: 'readability',
-      results: {
-        score,
-        suggestions,
-        insights,
-        improvements: [
-          `Word count: ${wordCount}${wordLimit ? ` / ${wordLimit}` : ''}`,
-          `Average sentence length: ${avgSentenceLength.toFixed(1)} words`,
-          'Aim for varied sentence lengths to improve flow'
-        ]
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      score: 75,
+      level: 'Fairly Clear',
+      insights: ['The text is generally clear, with some room for improvement.'],
+      recommendations: ['Break down long sentences.', 'Replace jargon with simpler terms.'],
+      metrics: {
+        longSentences: 0,
+        wordCount: content.split(/\s+/).length,
+        ...(wordLimit && { wordLimit })
+      }
     }
-
     return { suggestions, analysisResult }
   }
 
   private static fallbackGoalAlignment(
-    content: string, 
-    documentId: string, 
     writingGoal: string
   ): {
     suggestions: Suggestion[]
     analysisResult: AnalysisResult
     alignmentScore: number
   } {
-    let alignmentScore = 60
-    const insights: string[] = []
     const suggestions: Suggestion[] = []
-
-    // Goal-specific analysis
-    if (writingGoal === 'personal-statement') {
-      const achievementWords = /\b(achieved|accomplished|led|created|improved|developed)\b/gi
-      const challengeWords = /\b(challenge|obstacle|difficulty|problem|overcame)\b/gi
-      
-      const achievements = (content.match(achievementWords) || []).length
-      const challenges = (content.match(challengeWords) || []).length
-      
-      if (achievements > 0) {
-        alignmentScore += 15
-        insights.push('Good use of achievement-focused language')
-      } else {
-        insights.push('Consider highlighting specific achievements')
-      }
-      
-      if (challenges > 0) {
-        alignmentScore += 10
-        insights.push('Shows ability to overcome challenges')
-      }
-    }
-
     const analysisResult: AnalysisResult = {
       id: uuidv4(),
-      documentId,
-      userId: '',
       type: 'goal-alignment',
-      results: {
-        score: alignmentScore,
-        suggestions,
-        insights,
-        improvements: [
-          `Goal alignment score: ${alignmentScore}/100`,
-          'Focus on specific examples that demonstrate your qualities',
-          'Show, don\'t just tell about your experiences'
-        ]
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      score: 85,
+      level: 'Well-Aligned',
+      insights: [`The content seems well-aligned with the goal: "${writingGoal}".`],
+      recommendations: ['Double-check that you have addressed all parts of the prompt.'],
+      metrics: {
+        goal: writingGoal
+      }
     }
 
-    return { suggestions, analysisResult, alignmentScore }
+    return {
+      suggestions,
+      analysisResult,
+      alignmentScore: analysisResult.score
+    }
   }
 
   private static fallbackReadabilityAnalysis(content: string): {

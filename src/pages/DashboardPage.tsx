@@ -16,21 +16,10 @@ const formatDate = (date: Date) => {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const { user, logout } = useFirebaseAuthStore()
+  const { user } = useFirebaseAuthStore()
   const { documents, loadDocuments, createDocument, deleteDocument, loading } = useDocumentStore()
   const [isCreating, setIsCreating] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
-  const [showUserMenu, setShowUserMenu] = useState(false)
-
-  // Debug helper
-  const checkLocalStorage = () => {
-    if (user) {
-      const storageKey = `wordwise_documents_${user.uid}`
-      const docs = localStorage.getItem(storageKey)
-      console.log('LocalStorage contents:', docs)
-      console.log('Current documents in state:', documents)
-    }
-  }
 
   useEffect(() => {
     loadDocuments()

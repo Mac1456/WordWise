@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Heart, Brain, CheckCircle } from 'lucide-react'
 import { Document } from '../stores/documentStore'
 import { AIService } from '../services/aiService'
@@ -24,16 +24,14 @@ export default function ToneAnalysis({ document }: ToneAnalysisProps) {
     setIsAnalyzing(true)
     try {
       const result = await AIService.analyzeTone(
-        document.content, 
-        document.id, 
-        document.writingGoal || 'personal-statement'
+        document.content
       )
       
       setAnalysis({
-        score: result.results.score,
-        tone: 'sincere', // Default tone
-        insights: result.results.insights,
-        suggestions: result.results.improvements
+        score: result.score,
+        tone: result.level,
+        insights: result.insights,
+        suggestions: result.recommendations
       })
     } catch (error) {
       console.error('Tone analysis failed:', error)
