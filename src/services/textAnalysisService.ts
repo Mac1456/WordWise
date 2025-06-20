@@ -70,19 +70,50 @@ class TextAnalysisService {
       await this.initialize();
     }
 
-    const suggestions: TextSuggestion[] = [];
-    
-    // Basic text statistics
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
-    const wordCount = words.length;
-    const sentenceCount = sentences.length;
-    const characterCount = text.length;
-    const averageWordsPerSentence = sentenceCount > 0 ? wordCount / sentenceCount : 0;
-
-    // ⚡ INSTANT LOCAL CHECKS ONLY - No AI calls
+    // Fast analysis without AI - only local checks
     console.log('⚡ Running instant-only local checks...');
     
+    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    
+    // Get instant suggestions
+    const suggestions = await this.getInstantSuggestions(text);
+    console.log(`⚡ Instant analysis: ${suggestions.length} suggestions found`);
+    
+    // Calculate readability
+    const readability = this.calculateReadability(text);
+    
+    return {
+      suggestions,
+      readabilityScore: readability.score,
+      readabilityGrade: readability.grade,
+      wordCount: words.length,
+      sentenceCount: sentences.length,
+      characterCount: text.length,
+      averageWordsPerSentence: words.length / Math.max(sentences.length, 1),
+      complexWords: this.countComplexWords(words),
+      toneAnalysis: undefined
+    };
+  }
+
+  /**
+   * Fast tone analysis that only analyzes tone without full text analysis
+   */
+  async analyzeToneOnly(text: string): Promise<ToneAnalysis> {
+    if (text.length < 50) {
+      throw new Error('Text must be at least 50 characters long for tone analysis');
+    }
+    
+    console.log('⚡ Running fast tone analysis...');
+    return this.analyzeTone(text);
+  }
+
+  private async getInstantSuggestions(text: string): Promise<TextSuggestion[]> {
+    const suggestions: TextSuggestion[] = [];
+    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    
+    // ⚡ INSTANT LOCAL CHECKS ONLY - No AI calls
     const localGrammarSuggestions = await this.checkGrammar(text);
     suggestions.push(...localGrammarSuggestions);
     
@@ -92,29 +123,11 @@ class TextAnalysisService {
     const localStyleSuggestions = await this.checkStyle(text, words, sentences);
     suggestions.push(...localStyleSuggestions);
     
-    console.log(`⚡ Instant analysis: ${suggestions.length} suggestions found`);
-
     // Early deduplication before conflict resolution for better performance
     const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
     
     // Resolve conflicts between overlapping suggestions
-    const resolvedSuggestions = this.resolveConflictingSuggestions(deduplicatedSuggestions);
-
-    // Readability analysis
-    const readability = this.calculateReadability(text);
-    const complexWords = this.countComplexWords(words);
-
-    return {
-      suggestions: resolvedSuggestions,
-      readabilityScore: readability.score,
-      readabilityGrade: readability.grade,
-      wordCount,
-      sentenceCount,
-      characterCount,
-      averageWordsPerSentence: Math.round(averageWordsPerSentence * 10) / 10,
-      complexWords,
-      toneAnalysis: undefined
-    };
+    return this.resolveConflictingSuggestions(deduplicatedSuggestions);
   }
 
   /**
@@ -662,7 +675,58 @@ class TextAnalysisService {
       'previus': ['previous'],
       'sucess': ['success'],
       'suceed': ['succeed'],
-      'succes': ['success']
+      'succes': ['success'],
+      // More common misspellings
+      'spel': ['spell'],
+      'mysteri': ['mystery'],
+      'mysterys': ['mysteries'],
+      'mysterius': ['mysterious'],
+      'writting': ['writing'],
+      'writeing': ['writing'],
+      'writen': ['written'],
+      'geting': ['getting'],
+      'comming': ['coming'],
+      'runing': ['running'],
+      'stoping': ['stopping'],
+      'planing': ['planning'],
+      'wining': ['winning'],
+      'loosing': ['losing'],
+      'chosing': ['choosing'],
+      'makeing': ['making'],
+      'takeing': ['taking'],
+      'liveing': ['living'],
+      'giveing': ['giving'],
+      'moveing': ['moving'],
+      'hopeing': ['hoping'],
+      'careing': ['caring'],
+      'shareing': ['sharing'],
+      'dateing': ['dating'],
+      'skateing': ['skating'],
+      'danceing': ['dancing'],
+      'raceing': ['racing'],
+      'paceing': ['pacing'],
+      'faceing': ['facing'],
+      'placeing': ['placing'],
+      'spaceing': ['spacing'],
+      'traceing': ['tracing'],
+      'graceing': ['gracing'],
+      'braceing': ['bracing'],
+      'fo': ['for', 'of'],
+      'od': ['of', 'do'],
+      'whta': ['what'],
+      'waht': ['what'],
+      'woh': ['who'],
+      'hwo': ['how'],
+      'hwere': ['where'],
+      'wheer': ['where'],
+      'whne': ['when'],
+      'wehn': ['when'],
+      'whihc': ['which'],
+      'whcih': ['which'],
+      'wich': ['which'],
+      'wihch': ['which'],
+      'thre': ['there', 'three'],
+      'ther': ['there', 'their']
     };
 
     // Use regex to find all word positions accurately
@@ -986,7 +1050,7 @@ class TextAnalysisService {
         'spelling': 100,      // Highest - spelling errors are critical
         'grammar': 80,        // High - but lower than spelling
         'vocabulary': 60,     // Medium-High (specific word changes)
-        'conciseness': 50,    // Medium (can be stylistic)
+        'conciseness': 40,    // Medium (reduced to allow more coexistence)
         'style': 30,          // Lower (often subjective)
         'goal-alignment': 10, // Lowest (very broad, sentence-level)
       };
@@ -1042,41 +1106,60 @@ class TextAnalysisService {
     // Check for direct overlap - must have actual character overlap, not just touching
     const hasDirectOverlap = s1_start < s2_end && s2_start < s1_end;
     
-    // Special case: if one suggestion is spelling and the other is grammar,
-    // only consider it a conflict if they have very significant overlap (80%+)
-    // This allows both spelling corrections and grammar improvements to coexist
+    // If there's no direct overlap, no conflict
+    if (!hasDirectOverlap) return false;
+    
+    // Calculate overlap percentage for more nuanced conflict resolution
+    const overlapStart = Math.max(s1_start, s2_start);
+    const overlapEnd = Math.min(s1_end, s2_end);
+    const overlapLength = Math.max(0, overlapEnd - overlapStart);
+    const s1_length = s1_end - s1_start;
+    const s2_length = s2_end - s2_start;
+    const minLength = Math.min(s1_length, s2_length);
+    const maxLength = Math.max(s1_length, s2_length);
+    const overlapPercentage = overlapLength / minLength;
+    
+    // Special case: spelling vs conciseness - be very permissive
     if ((suggestion1.type === 'spelling' || suggestion2.type === 'spelling') && 
-        (suggestion1.type === 'grammar' || suggestion2.type === 'grammar')) {
-      const overlapStart = Math.max(s1_start, s2_start);
-      const overlapEnd = Math.min(s1_end, s2_end);
-      const overlapLength = Math.max(0, overlapEnd - overlapStart);
-      const minLength = Math.min(s1_end - s1_start, s2_end - s2_start);
-      
-      // Only conflict if overlap is more than 80% of the smaller suggestion
-      // This is much more restrictive, allowing most spelling/grammar pairs to coexist
-      return overlapLength > minLength * 0.8;
+        (suggestion1.type === 'conciseness' || suggestion2.type === 'conciseness')) {
+      // Only conflict if they have exact same range or >95% overlap
+      return (s1_start === s2_start && s1_end === s2_end) || overlapPercentage > 0.95;
     }
     
-    // Special case: vocabulary vs conciseness - allow them to coexist unless exact same range
+    // Special case: spelling vs grammar - allow more coexistence
+    if ((suggestion1.type === 'spelling' || suggestion2.type === 'spelling') && 
+        (suggestion1.type === 'grammar' || suggestion2.type === 'grammar')) {
+      // Only conflict if overlap is more than 90% of the smaller suggestion
+      return overlapPercentage > 0.9;
+    }
+    
+    // Special case: vocabulary vs conciseness - allow them to coexist unless very similar
     if ((suggestion1.type === 'vocabulary' || suggestion2.type === 'vocabulary') && 
         (suggestion1.type === 'conciseness' || suggestion2.type === 'conciseness')) {
-      // Only conflict if they have the exact same range
-      return s1_start === s2_start && s1_end === s2_end;
+      // Only conflict if they have exact same range or >90% overlap
+      return (s1_start === s2_start && s1_end === s2_end) || overlapPercentage > 0.9;
+    }
+    
+    // Special case: vocabulary vs grammar - be more permissive
+    if ((suggestion1.type === 'vocabulary' || suggestion2.type === 'vocabulary') && 
+        (suggestion1.type === 'grammar' || suggestion2.type === 'grammar')) {
+      // Only conflict if overlap is more than 80% of the smaller suggestion
+      return overlapPercentage > 0.8;
     }
     
     // Special case: goal-alignment vs other types - be very restrictive
     if (suggestion1.type === 'goal-alignment' || suggestion2.type === 'goal-alignment') {
-      // Only conflict if they have very significant overlap (90%+)
-      const overlapStart = Math.max(s1_start, s2_start);
-      const overlapEnd = Math.min(s1_end, s2_end);
-      const overlapLength = Math.max(0, overlapEnd - overlapStart);
-      const minLength = Math.min(s1_end - s1_start, s2_end - s2_start);
-      
-      return overlapLength > minLength * 0.9;
+      // Only conflict if they have very significant overlap (95%+)
+      return overlapPercentage > 0.95;
     }
     
-    // For other types, require direct overlap but be more permissive
-    return hasDirectOverlap;
+    // For same types, be more strict
+    if (suggestion1.type === suggestion2.type) {
+      return overlapPercentage > 0.5;
+    }
+    
+    // For different types not covered above, require significant overlap
+    return overlapPercentage > 0.7;
   }
 }
 

@@ -11,15 +11,16 @@ import {
   AlertCircle, 
   CheckCircle, 
   Lightbulb, 
-  Clock,
   Target,
-  Type,
+  BookOpen,
   Download,
   Trash2,
   CheckCheck,
   Zap,
-  BookOpen,
-  Scissors
+  Sparkles,
+  BrainCircuit,
+  ArrowRight,
+  X
 } from 'lucide-react'
 
 interface WritingEditorProps {
@@ -28,223 +29,63 @@ interface WritingEditorProps {
 
 export default function WritingEditor({ documentId }: WritingEditorProps) {
   const navigate = useNavigate()
-  const { currentDocument, updateDocument, setCurrentDocument, documents, deleteDocument } = useDocumentStore()
+  const { 
+    currentDocument, 
+    loadDocuments, 
+    updateDocument, 
+    deleteDocument,
+    setCurrentDocument 
+  } = useDocumentStore()
+
   const [content, setContent] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-  const [autoSaveTimeout, setAutoSaveTimeout] = useState<NodeJS.Timeout | null>(null)
   const [analysis, setAnalysis] = useState<TextAnalysis | null>(null)
-  const [selectedSuggestion, setSelectedSuggestion] = useState<TextSuggestion | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [wordLimit, setWordLimit] = useState<number | null>(null)
+  const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [selectedSuggestion, setSelectedSuggestion] = useState<TextSuggestion | null>(null)
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null)
   const [showToneAnalysis, setShowToneAnalysis] = useState(false)
   const [isRunningToneAnalysis, setIsRunningToneAnalysis] = useState(false)
-  const [analysisMode, setAnalysisMode] = useState<'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment'>('comprehensive')
-  const [writingGoal, setWritingGoal] = useState<string>('personal-statement')
-  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null)
-  const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
-  const [analysisTimeout, setAnalysisTimeout] = useState<NodeJS.Timeout | null>(null)
-  const [lastAnalyzedContent, setLastAnalyzedContent] = useState<string>('')
-  const [isApplyingSuggestion, setIsApplyingSuggestion] = useState(false)
-  const [analysisInProgress, setAnalysisInProgress] = useState(false)
 
+  // Load document
   useEffect(() => {
-    if (documentId && documents.length > 0) {
-      const doc = documents.find(d => d.id === documentId)
-      if (doc) {
-        setCurrentDocument(doc)
-        setContent(doc.content)
-        setWordLimit(doc.metadata?.wordLimit || null)
-        // Don't set lastAnalyzedContent to trigger analysis on load
-        setLastAnalyzedContent('')
-        setAnalysis(null) // Clear any existing analysis
-      }
-    }
-  }, [documentId, documents, setCurrentDocument])
-
-  useEffect(() => {
-    if (currentDocument) {
-      setContent(currentDocument.content)
-      setWordLimit(currentDocument.metadata?.wordLimit || null)
-      // Don't set lastAnalyzedContent to trigger analysis on load
-      setLastAnalyzedContent('')
-      setAnalysis(null) // Clear any existing analysis
-    }
-  }, [currentDocument])
-
-  // Auto-save functionality
-  const autoSave = useCallback(async (newContent: string) => {
-    if (!currentDocument || newContent === currentDocument.content) return
-    
-    try {
-      await updateDocument(currentDocument.id, { content: newContent })
-    } catch (error) {
-      console.error('Auto-save failed:', error)
-    }
-  }, [currentDocument, updateDocument])
-
-  // Simple hash function for content comparison
-  const hashContent = (content: string): string => {
-    let hash = 0;
-    for (let i = 0; i < content.length; i++) {
-      const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return hash.toString();
-  };
-
-  // Auto-analysis with debouncing
-  useEffect(() => {
-    // Clear any existing timeout
-    if (analysisTimeout) {
-      clearTimeout(analysisTimeout)
-      setAnalysisTimeout(null)
-    }
-
-    // Skip analysis if already in progress
-    if (analysisInProgress || isAutoAnalyzing) {
-      console.log('⏳ Analysis blocked - operation in progress')
-      return
-    }
-
-    // Skip if content hasn't changed since last analysis (using hash for better comparison)
-    const contentHash = hashContent(content.trim())
-    const lastHash = hashContent(lastAnalyzedContent.trim())
-    if (contentHash === lastHash && content.trim() === lastAnalyzedContent.trim()) {
-      console.log('⏸️ Content unchanged, skipping analysis')
-      return
-    }
-
-    if (content.trim().length >= 15) {
-      // Store the content we're analyzing
-      const contentToAnalyze = content;
-      
-      // Set all blocking flags immediately
-      setAnalysisInProgress(true)
-      setIsAutoAnalyzing(true)
-      setLastAnalyzedContent(contentToAnalyze)
-      
-      const analyzeTimer = setTimeout(async () => {
-        try {
-          console.log(`🚀 Starting unified analysis for: "${contentToAnalyze.slice(0, 30)}..."`)
-          
-          // ⚡ Get instant suggestions first
-          const instantResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
-          console.log(`⚡ Instant suggestions: ${instantResult.suggestions.length}`)
-          
-          // Update analysis with instant results, preserving existing structure
-          setAnalysis(prevAnalysis => ({
-            ...instantResult,
-            suggestions: instantResult.suggestions
-          }));
-          
-          // 🤖 Get AI suggestions and merge them
-          if (contentToAnalyze.trim().length >= 20) {
-            console.log('🤖 Getting AI enhancement...')
-            const enhancedResult = await textAnalysisService.analyzeText(contentToAnalyze, writingGoal, false, analysisMode, wordLimit || undefined, true)
-            
-            // Only update if AI actually added new suggestions (not just duplicates)
-            const newAISuggestions = enhancedResult.suggestions.filter(aiSugg => 
-              !instantResult.suggestions.some(instSugg => 
-                instSugg.originalText === aiSugg.originalText && 
-                instSugg.suggestedText === aiSugg.suggestedText &&
-                instSugg.startIndex === aiSugg.startIndex &&
-                instSugg.endIndex === aiSugg.endIndex
-              )
-            );
-            
-            if (newAISuggestions.length > 0) {
-              const mergedSuggestions = textAnalysisService.mergeSuggestions(instantResult.suggestions, enhancedResult.suggestions);
-              
-              // Update only the suggestions, keeping the rest of the analysis stable
-              setAnalysis(prevAnalysis => ({
-                ...enhancedResult,
-                suggestions: mergedSuggestions
-              }));
-              
-              console.log(`✅ Added ${newAISuggestions.length} new AI suggestions. Total: ${mergedSuggestions.length}`)
-            } else {
-              console.log(`⚡ No new AI suggestions found, keeping instant suggestions: ${instantResult.suggestions.length}`)
-            }
-          } else {
-            console.log(`✅ Analysis complete (instant only). Total suggestions: ${instantResult.suggestions.length}`)
-          }
-          
-        } catch (error) {
-          console.error('❌ Analysis failed:', error)
-          // Fall back to instant analysis only if AI fails
-          try {
-            const fallbackResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
-            setAnalysis(prevAnalysis => ({
-              ...fallbackResult,
-              suggestions: fallbackResult.suggestions
-            }))
-            console.log('⚡ Fallback to instant-only analysis')
-          } catch (fallbackError) {
-            console.error('❌ Fallback analysis also failed:', fallbackError)
-          }
-        } finally {
-          setIsAutoAnalyzing(false)
-          setAnalysisInProgress(false)
+    if (documentId) {
+      loadDocuments().then(() => {
+        const doc = useDocumentStore.getState().documents.find(d => d.id === documentId)
+        if (doc) {
+          setCurrentDocument(doc)
+          setContent(doc.content || '')
         }
-      }, 300) // Reduce debounce time back to 300ms for better responsiveness
+      })
+    }
+  }, [documentId, loadDocuments, setCurrentDocument])
 
-      setAnalysisTimeout(analyzeTimer)
+  // Debounced analysis effect
+  useEffect(() => {
+    if (!content.trim()) {
+      setAnalysis(null)
+      return
     }
 
-    return () => {
-      if (analysisTimeout) {
-        clearTimeout(analysisTimeout)
-        setAnalysisTimeout(null)
+    const timeoutId = setTimeout(async () => {
+      if (content.trim().length < 10) return
+
+      setIsAutoAnalyzing(true)
+      try {
+        const result = await textAnalysisService.analyzeTextInstant(content)
+        setAnalysis(result)
+      } catch (error) {
+        console.error('Auto-analysis failed:', error)
+      } finally {
+        setIsAutoAnalyzing(false)
       }
-    }
+    }, 1000)
+
+    return () => clearTimeout(timeoutId)
   }, [content])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Ctrl+Shift+A: Apply all suggestions
-      if (event.ctrlKey && event.shiftKey && event.key === 'A') {
-        event.preventDefault()
-        if (analysis?.suggestions.length && analysis.suggestions.length > 0) {
-          if (confirm(`Apply all ${analysis.suggestions.length} suggestions? (Ctrl+Shift+A)`)) {
-            applyAllSuggestions()
-          }
-        }
-      }
-      
-      // Ctrl+Shift+E: Apply all error corrections
-      if (event.ctrlKey && event.shiftKey && event.key === 'E') {
-        event.preventDefault()
-        const errorSuggestions = analysis?.suggestions.filter(s => s.severity === 'error') || []
-        if (errorSuggestions.length > 0) {
-          if (confirm(`Apply all ${errorSuggestions.length} error corrections? (Ctrl+Shift+E)`)) {
-            applyAllSuggestions(errorSuggestions)
-          }
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [analysis])
-
   const handleContentChange = (newContent: string) => {
-    console.log(`📝 Content change: "${newContent.slice(0, 50)}..." (length: ${newContent.length})`)
     setContent(newContent)
-    setSelectedSuggestion(null)
-    
-    // Clear existing timeout
-    if (autoSaveTimeout) {
-      clearTimeout(autoSaveTimeout)
-    }
-    
-    // Set new timeout for auto-save
-    const timeout = setTimeout(() => {
-      autoSave(newContent)
-    }, 2000) // Auto-save after 2 seconds of inactivity
-    
-    setAutoSaveTimeout(timeout)
   }
 
   const handleSave = async () => {
@@ -254,28 +95,15 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     try {
       await updateDocument(currentDocument.id, { content })
     } catch (error) {
-      console.error('Failed to save document:', error)
+      console.error('Save failed:', error)
     } finally {
       setIsSaving(false)
     }
   }
 
-  const handleWordLimitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const limit = e.target.value ? parseInt(e.target.value) : null
-    setWordLimit(limit)
-    if (currentDocument) {
-      updateDocument(currentDocument.id, { 
-        metadata: { 
-          ...currentDocument.metadata, 
-          wordLimit: limit || undefined 
-        } 
-      })
-    }
-  }
-
   const handleDownload = () => {
     if (!currentDocument) return
-
+    
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -288,792 +116,337 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }
 
   const handleDelete = async () => {
-    if (!currentDocument || !window.confirm('Are you sure you want to delete this document?')) return
+    if (!currentDocument) return
     
-    try {
-      await deleteDocument(currentDocument.id)
-      // Navigate back to dashboard after successful deletion
-      navigate('/dashboard')
-    } catch (error) {
-      console.error('Failed to delete document:', error)
-      // Error is already handled in the store with toast notification
+    if (confirm('Are you sure you want to delete this document?')) {
+      try {
+        await deleteDocument(currentDocument.id)
+        navigate('/dashboard')
+      } catch (error) {
+        console.error('Delete failed:', error)
+      }
     }
   }
 
   const applySuggestion = (suggestion: TextSuggestion) => {
-    setIsApplyingSuggestion(true)
-    setAnalysisInProgress(true) // Block all analysis
+    const beforeText = content.slice(0, suggestion.startIndex)
+    const afterText = content.slice(suggestion.endIndex)
+    const newContent = beforeText + suggestion.suggestedText + afterText
     
-    const newContent = 
-      content.substring(0, suggestion.startIndex) + 
-      suggestion.suggestedText + 
-      content.substring(suggestion.endIndex)
-
-    // Calculate text shift for adjusting other suggestions
-    const textShift = suggestion.suggestedText.length - suggestion.originalText.length
-    
-    // Remove the applied suggestion and adjust positions of remaining suggestions
-    if (analysis) {
-      const updatedSuggestions = analysis.suggestions
-        .filter(s => s.id !== suggestion.id)  // Remove applied suggestion
-        .map(s => {
-          // Adjust positions of suggestions that come after the applied one
-          if (s.startIndex > suggestion.endIndex) {
-            return {
-              ...s,
-              startIndex: s.startIndex + textShift,
-              endIndex: s.endIndex + textShift
-            }
-          }
-          return s
-        })
-      
-      setAnalysis({
-        ...analysis,
-        suggestions: updatedSuggestions
-      })
-    }
-    
-    setSelectedSuggestion(null)
-    
-    // Apply the change and update tracked content atomically
     setContent(newContent)
-    setLastAnalyzedContent(newContent) // Update tracked content to prevent immediate re-analysis
     
-    // Clear existing timeout
-    if (autoSaveTimeout) {
-      clearTimeout(autoSaveTimeout)
-    }
-    
-    // Set new timeout for auto-save
-    const timeout = setTimeout(() => {
-      autoSave(newContent)
-    }, 2000)
-    setAutoSaveTimeout(timeout)
-    
-    // Track suggestion acceptance for learning
-    console.log('✅ Suggestion applied:', {
-      type: suggestion.type,
-      severity: suggestion.severity,
-      originalText: suggestion.originalText,
-      suggestedText: suggestion.suggestedText
-    })
-    
-    // Allow analysis to resume after content is stable
-    setTimeout(() => {
-      setIsApplyingSuggestion(false)
-      setAnalysisInProgress(false)
-    }, 150)
-  }
-
-  const dismissSuggestion = (suggestionId: string, helpful: boolean = false) => {
     if (analysis) {
-      const suggestion = analysis.suggestions.find(s => s.id === suggestionId)
-      if (suggestion) {
-        // Track suggestion feedback for learning
-        console.log('Suggestion dismissed:', {
-          type: suggestion.type,
-          severity: suggestion.severity,
-          helpful,
-          suggestionId
-        })
-      }
-      
-      setAnalysis({
-        ...analysis,
-        suggestions: analysis.suggestions.filter(s => s.id !== suggestionId)
-      })
+      const updatedSuggestions = analysis.suggestions.filter(s => s.id !== suggestion.id)
+      setAnalysis({ ...analysis, suggestions: updatedSuggestions })
     }
-    setSelectedSuggestion(null)
   }
 
-  const applyAllSuggestions = async (suggestionsToApply?: TextSuggestion[]) => {
-    if (!analysis || !analysis.suggestions.length) return
+  const dismissSuggestion = (suggestionId: string) => {
+    if (analysis) {
+      const updatedSuggestions = analysis.suggestions.filter(s => s.id !== suggestionId)
+      setAnalysis({ ...analysis, suggestions: updatedSuggestions })
+    }
+  }
 
-    const suggestions = suggestionsToApply || analysis.suggestions
-    if (suggestions.length === 0) return
+  const applyAllSuggestions = () => {
+    if (!analysis?.suggestions.length) return
     
-    setIsApplyingSuggestion(true)
-    setAnalysisInProgress(true) // Block all analysis during bulk application
-
-    // Sort suggestions by start index in descending order (end to start)
-    // This prevents index conflicts when applying multiple changes
-    const sortedSuggestions = [...suggestions].sort((a, b) => b.startIndex - a.startIndex)
-
+    const sortedSuggestions = [...analysis.suggestions].sort((a, b) => b.startIndex - a.startIndex)
+    
     let newContent = content
-    let appliedCount = 0
-
-    console.log(`Applying ${sortedSuggestions.length} suggestions in bulk...`)
-
-    // Apply all suggestions to the text
-    for (const suggestion of sortedSuggestions) {
-      // Verify the suggestion is still valid (text hasn't changed)
-      const originalText = newContent.substring(suggestion.startIndex, suggestion.endIndex)
-      if (originalText === suggestion.originalText) {
-        newContent =
-          newContent.substring(0, suggestion.startIndex) + 
-          suggestion.suggestedText +
-          newContent.substring(suggestion.endIndex)
-        
-        appliedCount++
-        console.log(`Applied: "${suggestion.originalText}" → "${suggestion.suggestedText}"`)
-      } else {
-        console.warn(`Skipping suggestion "${suggestion.originalText}" - text has changed`)
-      }
-    }
-
-    if (appliedCount === 0) {
-      alert('No suggestions could be applied. The text may have changed.')
-      return
-    }
-
-    // Remove applied suggestions from the analysis
-    const appliedIds = new Set(suggestions.map(s => s.id))
-    setAnalysis(prevAnalysis => {
-      if (!prevAnalysis) return null
-      
-      return {
-        ...prevAnalysis,
-        suggestions: prevAnalysis.suggestions.filter(s => !appliedIds.has(s.id))
-      }
+    sortedSuggestions.forEach(suggestion => {
+      const beforeText = newContent.slice(0, suggestion.startIndex)
+      const afterText = newContent.slice(suggestion.endIndex)
+      newContent = beforeText + suggestion.suggestedText + afterText
     })
     
-    setSelectedSuggestion(null)
-
-    // Update content
     setContent(newContent)
-    setLastAnalyzedContent(newContent) // Update tracked content to prevent immediate re-analysis
-
-    // Clear existing timeout
-    if (autoSaveTimeout) {
-      clearTimeout(autoSaveTimeout)
-    }
-
-    // Set new timeout for auto-save
-    const timeout = setTimeout(() => {
-      autoSave(newContent)
-    }, 2000)
-    setAutoSaveTimeout(timeout)
-
-    // Show success message
-    alert(`Successfully applied ${appliedCount} suggestion${appliedCount === 1 ? '' : 's'}!`)
-    
-    console.log(`Bulk application completed: ${appliedCount} suggestions applied`)
-    
-    // Allow analysis to resume after bulk application
-    setTimeout(() => {
-      setIsApplyingSuggestion(false)
-      setAnalysisInProgress(false)
-    }, 200)
+    setAnalysis({ ...analysis, suggestions: [] })
   }
-
-  const applyAllByType = (type: string) => {
-    if (!analysis) return
-    const suggestionsOfType = analysis.suggestions.filter(s => s.type === type)
-    if (suggestionsOfType.length === 0) return
-    
-    const confirmMessage = `Apply all ${suggestionsOfType.length} ${type} suggestion${suggestionsOfType.length === 1 ? '' : 's'}?`
-    if (confirm(confirmMessage)) {
-      applyAllSuggestions(suggestionsOfType)
-    }
-  }
-
-  const applyAllErrors = () => {
-    if (!analysis) return
-    const errorSuggestions = analysis.suggestions.filter(s => s.severity === 'error')
-    if (errorSuggestions.length === 0) return
-    
-    const confirmMessage = `Apply all ${errorSuggestions.length} error correction${errorSuggestions.length === 1 ? '' : 's'}?`
-    if (confirm(confirmMessage)) {
-      applyAllSuggestions(errorSuggestions)
-    }
-  }
-
-  const applyAllSpelling = () => applyAllByType('spelling')
-  const applyAllGrammar = () => applyAllByType('grammar')
 
   const handleToneAnalysis = async () => {
-    if (!content.trim() || content.trim().length < 50) {
-      alert('Please write at least 50 characters for tone analysis.')
-      return
-    }
-
-    // Prevent multiple simultaneous analyses
-    if (isRunningToneAnalysis || isAnalyzing || isAutoAnalyzing) {
-      console.log('Analysis already in progress, skipping tone analysis...')
-      return
-    }
-
+    if (content.length < 50) return
+    
     setIsRunningToneAnalysis(true)
     try {
-      const writingGoal = 'personal-statement'
-      const result = await textAnalysisService.analyzeText(content, writingGoal, true, 'comprehensive', undefined, false)
-      if (result.toneAnalysis) {
-        setAnalysis(result)
-        setLastAnalyzedContent(content) // Update tracked content
-        setShowToneAnalysis(true)
-      }
+      const toneAnalysis = await textAnalysisService.analyzeToneOnly(content)
+      setAnalysis(prev => prev ? { ...prev, toneAnalysis } : {
+        suggestions: [],
+        readabilityScore: 0,
+        readabilityGrade: 'N/A',
+        wordCount: content.trim().split(/\s+/).filter(w => w.length > 0).length,
+        sentenceCount: content.split(/[.!?]+/).filter(s => s.trim().length > 0).length,
+        characterCount: content.length,
+        averageWordsPerSentence: 0,
+        complexWords: 0,
+        toneAnalysis
+      })
+      setShowToneAnalysis(true)
     } catch (error) {
       console.error('Tone analysis failed:', error)
-      alert('Tone analysis failed. Please try again.')
     } finally {
       setIsRunningToneAnalysis(false)
     }
   }
 
-  const runAIAnalysis = async (specificMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment') => {
-    if (!content.trim() || content.trim().length < 15) {
-      alert('Please write at least 15 characters for analysis.')
-      return
-    }
-
-    // Prevent multiple simultaneous analyses
-    if (isAnalyzing || isAutoAnalyzing) {
-      console.log('Analysis already in progress, skipping...')
-      return
-    }
-
-    setIsAnalyzing(true)
+  const handleManualAIAnalysis = async () => {
+    if (!content || isAnalyzing) return
     
-    // Clear existing analysis timeout to prevent conflicts
-    if (analysisTimeout) {
-      clearTimeout(analysisTimeout)
-      setAnalysisTimeout(null)
-    }
-
-    const targetMode = specificMode || analysisMode
+    setIsAnalyzing(true)
     try {
-      // 🚀 HYBRID APPROACH: Instant + Enhanced Manual Analysis
-      console.log(`🚀 Starting hybrid manual analysis (${targetMode})...`)
-      
-      // ⚡ PHASE 1: INSTANT LOCAL ANALYSIS (immediate feedback)
-      const instantResult = await textAnalysisService.analyzeTextInstant(content)
-      setAnalysis(instantResult) // Show instant results immediately
-      console.log(`⚡ Instant manual analysis: ${instantResult.suggestions.length} suggestions`)
-      
-      // 🤖 PHASE 2: AI ENHANCEMENT (seamless addition of new suggestions)
-      if (content.trim().length >= 20) {
-        console.log('🤖 Starting AI enhancement...')
-        const enhancedResult = await textAnalysisService.analyzeText(content, writingGoal, false, targetMode, wordLimit || undefined, true)
-        
-        // Seamlessly merge AI suggestions with existing instant suggestions
-        setAnalysis(prevAnalysis => {
-          if (!prevAnalysis) return enhancedResult
-          
-          // Keep all existing suggestions and add new AI suggestions
-          const mergedSuggestions = [
-            ...prevAnalysis.suggestions,
-            ...enhancedResult.suggestions.filter(aiSuggestion => 
-              !prevAnalysis.suggestions.some(existingSuggestion =>
-                existingSuggestion.originalText.toLowerCase() === aiSuggestion.originalText.toLowerCase() ||
-                (Math.abs(existingSuggestion.startIndex - aiSuggestion.startIndex) < 5 &&
-                 Math.abs(existingSuggestion.endIndex - aiSuggestion.endIndex) < 5)
-              )
-            )
-          ]
-          
-          return {
-            ...enhancedResult,
-            suggestions: mergedSuggestions
-          }
-        })
-        
-        console.log(`🤖 AI enhancement completed - seamlessly merged suggestions`)
-      }
-      
-      setLastAnalyzedContent(content) // Update tracked content
-      console.log(`🚀 Hybrid manual analysis completed (${targetMode})`)
+      const result = await textAnalysisService.analyzeText(content)
+      setAnalysis(result)
     } catch (error) {
-      console.error('Hybrid manual analysis failed:', error)
-      // Fall back to instant analysis only if AI fails
-      try {
-        const fallbackResult = await textAnalysisService.analyzeTextInstant(content)
-        setAnalysis(fallbackResult)
-        console.log('⚡ Fallback to instant analysis only')
-      } catch (fallbackError) {
-        console.error('Fallback analysis also failed:', fallbackError)
-        alert('Analysis failed. Please try again.')
-      }
+      console.error('Manual analysis failed:', error)
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-  const handleManualAIAnalysis = () => runAIAnalysis()
+  const getSuggestionCardProps = (suggestion: TextSuggestion) => {
+    switch (suggestion.type) {
+      case 'spelling':
+        return {
+          icon: <AlertCircle className="h-4 w-4 text-red-500" />,
+          bgColor: 'bg-red-50',
+          borderColor: 'border-red-200',
+          titleColor: 'text-red-800',
+        }
+      case 'grammar':
+        return {
+          icon: <CheckCircle className="h-4 w-4 text-yellow-500" />,
+          bgColor: 'bg-yellow-50',
+          borderColor: 'border-yellow-200',
+          titleColor: 'text-yellow-800',
+        }
+      case 'style':
+        return {
+          icon: <Sparkles className="h-4 w-4 text-blue-500" />,
+          bgColor: 'bg-blue-50',
+          borderColor: 'border-blue-200',
+          titleColor: 'text-blue-800',
+        }
+      case 'vocabulary':
+        return {
+          icon: <Lightbulb className="h-4 w-4 text-purple-500" />,
+          bgColor: 'bg-purple-50',
+          borderColor: 'border-purple-200',
+          titleColor: 'text-purple-800',
+        }
+      default:
+        return {
+          icon: <CheckCircle className="h-4 w-4 text-gray-500" />,
+          bgColor: 'bg-gray-50',
+          borderColor: 'border-gray-200',
+          titleColor: 'text-gray-800',
+        }
+    }
+  }
 
-  if (!currentDocument) {
+  const SuggestionCard = ({ suggestion }: { suggestion: TextSuggestion }) => {
+    const cardProps = getSuggestionCardProps(suggestion)
+    
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500">No document selected</p>
+      <div className={`p-3 rounded-lg border transition-all ${cardProps.borderColor} ${cardProps.bgColor}`}>
+        <div className="flex items-start">
+          <div className="mr-2 flex-shrink-0">{cardProps.icon}</div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-medium ${cardProps.titleColor} capitalize`}>
+              {suggestion.type.replace('-', ' ')}
+            </p>
+            <p className="text-sm text-gray-700 mt-1">
+              {suggestion.message}
+            </p>
+          </div>
+          <button 
+            onClick={() => dismissSuggestion(suggestion.id)} 
+            className="p-1 -mr-1 -mt-1 rounded-full text-gray-400 hover:bg-gray-200"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <span className="line-through text-gray-500 truncate">
+            {suggestion.originalText}
+          </span>
+          <ArrowRight size={12} className="text-gray-400 flex-shrink-0" />
+          <span className="font-medium text-green-600 truncate">
+            {suggestion.suggestedText}
+          </span>
+        </div>
+        
+        <div className="mt-3 flex gap-2">
+          <button 
+            onClick={() => dismissSuggestion(suggestion.id)} 
+            className="flex-1 px-3 py-1 text-xs font-medium text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+          >
+            Dismiss
+          </button>
+          <button 
+            onClick={() => applySuggestion(suggestion)} 
+            className="flex-1 px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
+          >
+            Apply
+          </button>
         </div>
       </div>
     )
   }
 
-  // Calculate statistics
+  if (!currentDocument) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-50">
+        <div className="text-center">
+          <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-700">No Document Selected</h2>
+          <p className="text-gray-500 mt-2">Please select a document to begin editing.</p>
+          <button 
+            onClick={() => navigate('/dashboard')} 
+            className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Go to Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   const words = content.trim().split(/\s+/).filter(word => word.length > 0)
   const wordCount = analysis?.wordCount || words.length
-  const characterCount = analysis?.characterCount || content.length
-  const sentences = analysis?.sentenceCount || content.split(/[.!?]+/).filter(s => s.trim().length > 0).length
-
-  // Word limit progress
-  const isOverLimit = wordLimit && wordCount > wordLimit
-  const limitProgress = wordLimit ? (wordCount / wordLimit) * 100 : 0
-
-  // Group suggestions by type
-  const suggestionsByType = analysis?.suggestions.reduce((acc, suggestion) => {
-    if (!acc[suggestion.type]) acc[suggestion.type] = []
-    acc[suggestion.type].push(suggestion)
-    return acc
-  }, {} as Record<string, TextSuggestion[]>) || {}
-
-  const getSeverityIcon = (severity: string) => {
-    switch (severity) {
-      case 'error': return <AlertCircle className="h-4 w-4 text-red-500" />
-      case 'warning': return <AlertCircle className="h-4 w-4 text-yellow-500" />
-      case 'suggestion': return <Lightbulb className="h-4 w-4 text-blue-500" />
-      default: return <CheckCircle className="h-4 w-4 text-gray-500" />
-    }
-  }
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'error':
-        return 'bg-red-50 border-red-200 hover:bg-red-100';
-      case 'warning':
-        return 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100';
-      case 'suggestion':
-        return 'bg-blue-50 border-blue-200 hover:bg-blue-100';
-      default:
-        return 'bg-gray-50 border-gray-200 hover:bg-gray-100';
-    }
-  }
-
-  const totalIssues = analysis?.suggestions.length || 0
-  const errorCount = analysis?.suggestions.filter(s => s.severity === 'error').length || 0
-  const warningCount = analysis?.suggestions.filter(s => s.severity === 'warning').length || 0
-  const isAnyAnalysisRunning = isAnalyzing || isAutoAnalyzing || isRunningToneAnalysis
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Editor */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200">
-            {/* Header */}
-            <div className="border-b border-gray-200 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-blue-50 rounded-lg">
-                    <FileText className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <h1 className="text-xl font-semibold text-gray-900">
-                    {currentDocument.title}
-                  </h1>
-                  {isAnalyzing && (
-                    <div className="flex items-center text-sm text-blue-600">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                      Analyzing...
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={handleDownload}
-                    className="flex items-center px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 transition-all shadow-sm"
-                  >
-                    <Download className="h-4 w-4 mr-1" />
-                    Download
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white text-sm rounded-lg hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                  >
-                    <Save className="h-4 w-4 mr-1" />
-                    {isSaving ? 'Saving...' : 'Save'}
-                  </button>
-                  <button
-                    onClick={handleManualAIAnalysis}
-                    disabled={isAnalyzing || content.trim().length < 20}
-                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm rounded-lg hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                  >
-                    <Lightbulb className="h-4 w-4 mr-1" />
-                    {isAnalyzing ? 'Analyzing...' : 'AI Analysis'}
-                  </button>
-                  <button
-                    onClick={handleToneAnalysis}
-                    disabled={isRunningToneAnalysis || content.trim().length < 50}
-                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-purple-600 to-violet-600 text-white text-sm rounded-lg hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                  >
-                    <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h3a1 1 0 110 2H5a1 1 0 110-2h2z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6h12l-1 10H7L6 6z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m10 11 2 2 4-4" />
-                    </svg>
-                    {isRunningToneAnalysis ? 'Analyzing...' : 'Tone Analysis'}
-                  </button>
-                  <button
-                    onClick={handleDelete}
-                    className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-red-600 to-rose-600 rounded-lg hover:from-red-700 hover:to-rose-700 transition-all shadow-sm"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
-                  </button>
-                </div>
-              </div>
-              
-              <div className="mt-3 flex items-center justify-between">
-                <div className="flex items-center space-x-4 text-sm text-gray-500">
-                  <span>{wordCount} words</span>
-                  {totalIssues > 0 && (
-                    <div className="flex items-center space-x-2">
-                      {errorCount > 0 && (
-                        <span className="flex items-center text-red-600">
-                          <AlertCircle className="h-3 w-3 mr-1" />
-                          {errorCount} errors
-                        </span>
-                      )}
-                      {warningCount > 0 && (
-                        <span className="flex items-center text-yellow-600">
-                          <AlertCircle className="h-3 w-3 mr-1" />
-                          {warningCount} warnings
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <span>Auto-save enabled</span>
-                </div>
-              </div>
+    <div className="h-full flex bg-gray-50">
+      {/* Main Editor */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Stats Bar */}
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
+          <div className="flex items-center space-x-4 text-sm text-gray-600">
+            <div className="flex items-center space-x-1">
+              <BookOpen size={14} />
+              <span>{wordCount} words</span>
             </div>
-
-            {/* Simplified Controls */}
-            <div className="p-3 border-b border-gray-200 bg-gray-50">
-              <div className="flex flex-wrap items-center gap-4">
-                {/* Word Limit */}
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm text-gray-700">
-                    Word limit:
-                    <input
-                      type="number"
-                      value={wordLimit || ''}
-                      onChange={handleWordLimitChange}
-                      placeholder="500"
-                      className="ml-1 w-16 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </label>
-                  {wordLimit && (
-                    <span className={`text-sm ${isOverLimit ? 'text-red-600' : 'text-green-600'}`}>
-                      {wordCount}/{wordLimit}
-                    </span>
-                  )}
-                </div>
-
-                {/* Status indicator */}
-                <div className="flex items-center space-x-2 text-sm text-gray-600">
-                  <span>✨ Comprehensive analysis enabled</span>
-                </div>
+            <div className="flex items-center space-x-1">
+              <Target size={14} />
+              <span>{Math.ceil(wordCount / 200)} min read</span>
             </div>
-                    </div>
-
-            {/* Editor */}
-            <div className="p-4">
-              <HighlightedTextArea
-                value={content}
-                onChange={handleContentChange}
-                suggestions={analysis?.suggestions || []}
-                onSuggestionClick={(suggestion) => {
-                  setSelectedSuggestion(suggestion)
-                  // Calculate tooltip position
-                  const rect = document.querySelector('.highlighted-text-area')?.getBoundingClientRect()
-                  if (rect) {
-                    setTooltipPosition({
-                      x: rect.left + suggestion.startIndex * 8, // Rough estimate based on character width
-                      y: rect.top + 50 // Position below the text
-                    })
-                  }
-                }}
-                placeholder="Start writing your essay here..."
-                className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-base leading-relaxed highlighted-text-area"
-              />
+            <div className="flex items-center space-x-1">
+              <BrainCircuit size={14} />
+              <span>Clarity: {analysis?.readabilityScore ? Math.round(analysis.readabilityScore) : 'N/A'}/100</span>
             </div>
-
-            {/* Enhanced Stats */}
-            <div className="border-t border-gray-200 p-4 bg-gray-50">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className="flex items-center justify-center mb-1">
-                    <Type className="h-4 w-4 text-gray-400 mr-1" />
-                  </div>
-                  <div className="text-xl font-bold text-gray-900">{wordCount}</div>
-                  <div className="text-xs text-gray-500">Words</div>
-                </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center mb-1">
-                    <Target className="h-4 w-4 text-gray-400 mr-1" />
-                  </div>
-                  <div className="text-xl font-bold text-gray-900">{sentences}</div>
-                  <div className="text-xs text-gray-500">Sentences</div>
-                </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center mb-1">
-                    <FileText className="h-4 w-4 text-gray-400 mr-1" />
-                  </div>
-                  <div className="text-xl font-bold text-gray-900">{characterCount}</div>
-                  <div className="text-xs text-gray-500">Characters</div>
-                </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center mb-1">
-                    <Clock className="h-4 w-4 text-gray-400 mr-1" />
-                  </div>
-                  <div className="text-xl font-bold text-gray-900">
-                    {analysis?.averageWordsPerSentence?.toFixed(1) || '0'}
-                  </div>
-                  <div className="text-xs text-gray-500">Avg Words/Sentence</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Readability Score */}
-            {analysis && (
-              <div className="border-t border-gray-200 p-4">
-                <h3 className="text-sm font-medium text-gray-900 mb-3">Readability Analysis</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="text-center bg-blue-50 rounded-lg p-3">
-                    <p className="text-2xl font-bold text-blue-600">{analysis.readabilityScore}</p>
-                    <p className="text-xs text-gray-600">Reading Ease Score</p>
-                  </div>
-                  <div className="text-center bg-green-50 rounded-lg p-3">
-                    <p className="text-lg font-semibold text-green-600">{analysis.readabilityGrade}</p>
-                    <p className="text-xs text-gray-600">Grade Level</p>
-                  </div>
-                  <div className="text-center bg-yellow-50 rounded-lg p-3">
-                    <p className="text-lg font-semibold text-yellow-600">{analysis.complexWords}</p>
-                    <p className="text-xs text-gray-600">Complex Words</p>
-                  </div>
-                </div>
-              </div>
-            )}
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleToneAnalysis}
+              disabled={isRunningToneAnalysis || content.length < 50}
+              className="px-3 py-1 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:bg-indigo-400"
+            >
+              {isRunningToneAnalysis ? 'Analyzing...' : 'Tone Analysis'}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="px-3 py-1 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 disabled:bg-blue-400"
+            >
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
+            <button
+              onClick={handleDownload}
+              className="p-1 text-gray-600 bg-gray-200 rounded hover:bg-gray-300"
+              title="Download"
+            >
+              <Download size={16} />
+            </button>
+            <button
+              onClick={handleDelete}
+              className="p-1 text-red-500 bg-red-100 rounded hover:bg-red-200"
+              title="Delete"
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
         </div>
 
-        {/* Suggestions Sidebar */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sticky top-6 max-h-screen overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-900">Suggestions</h3>
-              <div className="flex items-center space-x-2">
-                {isAnyAnalysisRunning && (
-                  <div className="flex items-center space-x-1 text-xs text-blue-600">
-                    <div className="animate-spin h-3 w-3 border border-blue-600 border-t-transparent rounded-full"></div>
-                    <span>Analyzing...</span>
-                  </div>
-                )}
-                {analysis?.suggestions.length ? (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                    {analysis.suggestions.length}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            
-            {/* Bulk Action Buttons */}
-            {analysis?.suggestions.length && analysis.suggestions.length > 1 && (
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs font-medium text-gray-700">Quick Actions</div>
-                  <div className="text-xs text-gray-500" title="Keyboard shortcuts: Ctrl+Shift+A (Apply All), Ctrl+Shift+E (Fix Errors)">
-                    ⌨️ Shortcuts
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      if (analysis && confirm(`Apply all ${analysis.suggestions.length} suggestions?`)) {
-                        applyAllSuggestions()
-                      }
-                    }}
-                    className="px-3 py-2 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors flex items-center justify-center space-x-1"
-                  >
-                    <CheckCheck className="h-3 w-3" />
-                    <span>Apply All ({analysis?.suggestions.length || 0})</span>
-                  </button>
-                  {errorCount > 0 && (
-                    <button
-                      onClick={applyAllErrors}
-                      className="px-3 py-2 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors flex items-center justify-center space-x-1"
-                    >
-                      <Zap className="h-3 w-3" />
-                      <span>Fix Errors ({errorCount})</span>
-                    </button>
-                  )}
-                </div>
-                
-                {/* Type-specific buttons */}
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  {suggestionsByType.spelling?.length > 0 && (
-                    <button
-                      onClick={applyAllSpelling}
-                      className="px-3 py-2 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1"
-                    >
-                      <Type className="h-3 w-3" />
-                      <span>Spelling ({suggestionsByType.spelling.length})</span>
-                    </button>
-                  )}
-                  {suggestionsByType.grammar?.length > 0 && (
-                    <button
-                      onClick={applyAllGrammar}
-                      className="px-3 py-2 text-xs font-medium text-white bg-purple-600 rounded hover:bg-purple-700 transition-colors flex items-center justify-center space-x-1"
-                    >
-                      <BookOpen className="h-3 w-3" />
-                      <span>Grammar ({suggestionsByType.grammar.length})</span>
-                    </button>
-                  )}
-                  {suggestionsByType.vocabulary?.length > 0 && (
-                    <button
-                      onClick={() => applyAllByType('vocabulary')}
-                      className="px-3 py-2 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors flex items-center justify-center space-x-1"
-                    >
-                      <Lightbulb className="h-3 w-3" />
-                      <span>Vocabulary ({suggestionsByType.vocabulary.length})</span>
-                    </button>
-                  )}
-                  {suggestionsByType.conciseness?.length > 0 && (
-                    <button
-                      onClick={() => applyAllByType('conciseness')}
-                      className="px-3 py-2 text-xs font-medium text-white bg-teal-600 rounded hover:bg-teal-700 transition-colors flex items-center justify-center space-x-1"
-                    >
-                      <Scissors className="h-3 w-3" />
-                      <span>Concise ({suggestionsByType.conciseness.length})</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {!analysis?.suggestions.length ? (
-              <div className="text-center py-8">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
-                <p className="text-sm text-gray-600 font-medium">Great work!</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {content.trim().length > 10 ? 'No issues found in your writing.' : 'Start writing to see suggestions...'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {/* All Suggestions - Simplified */}
-                {analysis.suggestions.slice(0, 10).map((suggestion) => (
-                  <div
-                    key={suggestion.id}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                    onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start space-x-2 flex-1 min-w-0">
-                        {getSeverityIcon(suggestion.severity)}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                              suggestion.type === 'grammar' ? 'bg-red-100 text-red-700' :
-                              suggestion.type === 'vocabulary' ? 'bg-purple-100 text-purple-700' :
-                              suggestion.type === 'conciseness' ? 'bg-blue-100 text-blue-700' :
-                              suggestion.type === 'goal-alignment' ? 'bg-green-100 text-green-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>
-                              {suggestion.type.replace('-', ' ')}
-                            </span>
-                            {suggestion.wordsSaved && (
-                              <span className="text-xs text-green-600">-{suggestion.wordsSaved}w</span>
-                            )}
-                          </div>
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {suggestion.message}
-                          </p>
-                          <p className="text-xs text-gray-600 mt-1 truncate">
-                            "{suggestion.originalText.substring(0, 30)}..."
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {selectedSuggestion?.id === suggestion.id && (
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <p className="text-xs text-gray-600 mb-3 break-words">{suggestion.explanation}</p>
-                        {suggestion.originalText !== suggestion.suggestedText && (
-                          <div className="mb-3 p-2 bg-gray-50 rounded text-xs">
-                            <div className="text-gray-500 mb-1">Suggested:</div>
-                            <div className="text-gray-900 break-words">{suggestion.suggestedText}</div>
-                          </div>
-                        )}
-                        {suggestion.alternatives && (
-                          <div className="mb-3">
-                            <div className="text-xs text-gray-500 mb-1">Alternatives:</div>
-                            <div className="flex flex-wrap gap-1">
-                              {suggestion.alternatives.slice(0, 3).map((alt, index) => (
-                                <button
-                                  key={index}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    const newSuggestion = { ...suggestion, suggestedText: alt }
-                                    applySuggestion(newSuggestion)
-                                  }}
-                                  className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
-                                >
-                                  {alt}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              applySuggestion(suggestion)
-                            }}
-                            className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700"
-                          >
-                            Apply
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              dismissSuggestion(suggestion.id)
-                            }}
-                            className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                        </div>
-                      ))}
-              </div>
-            )}
-          </div>
+        {/* Editor Area */}
+        <div className="flex-1 overflow-hidden">
+          <HighlightedTextArea
+            value={content}
+            onChange={handleContentChange}
+            suggestions={analysis?.suggestions || []}
+            onSuggestionClick={(suggestion, element) => {
+              const rect = element.getBoundingClientRect()
+              setSelectedSuggestion(suggestion)
+              setTooltipPosition({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY })
+            }}
+            placeholder="Start writing your personal statement..."
+            className="w-full h-full p-6 text-lg leading-relaxed text-gray-900 focus:outline-none"
+          />
         </div>
       </div>
 
-      {/* Tone Analysis Panel */}
-      {showToneAnalysis && analysis?.toneAnalysis && (
-        <ToneAnalysisPanel
-          toneAnalysis={analysis.toneAnalysis}
-          isLoading={false}
-          onClose={() => setShowToneAnalysis(false)}
-        />
-      )}
+      {/* Suggestions Panel */}
+      <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+              <Sparkles className="mr-2 text-purple-500" size={20} />
+              Suggestions
+            </h2>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={handleManualAIAnalysis}
+                disabled={isAutoAnalyzing || isAnalyzing}
+                className="p-2 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 disabled:opacity-50"
+                title="Run AI Analysis"
+              >
+                <Zap size={14} />
+              </button>
+              <button
+                onClick={applyAllSuggestions}
+                disabled={!analysis?.suggestions?.length}
+                className="p-2 bg-green-100 text-green-700 rounded-full hover:bg-green-200 disabled:opacity-50"
+                title={`Apply All ${analysis?.suggestions?.length || 0} Suggestions`}
+              >
+                <CheckCheck size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4">
+          {analysis?.suggestions?.length ? (
+            <div className="space-y-3">
+              {analysis.suggestions.map((suggestion) => (
+                <SuggestionCard key={suggestion.id} suggestion={suggestion} />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 py-8">
+              {isAutoAnalyzing || isAnalyzing ? (
+                <>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-4"></div>
+                  <p className="text-sm">Analyzing your text...</p>
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={48} className="mx-auto text-green-500 mb-4" />
+                  <h3 className="font-medium text-gray-700">All Clear!</h3>
+                  <p className="text-sm mt-1">No suggestions at the moment.</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
-      {/* Enhanced Suggestion Tooltip */}
+      {/* Tooltip */}
       {selectedSuggestion && tooltipPosition && (
         <SuggestionTooltip
           suggestion={selectedSuggestion}
           position={tooltipPosition}
           onApply={() => {
-            applySuggestion(selectedSuggestion)
+            if (selectedSuggestion) applySuggestion(selectedSuggestion)
             setSelectedSuggestion(null)
             setTooltipPosition(null)
           }}
@@ -1082,13 +455,21 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
             setTooltipPosition(null)
           }}
           onDismiss={() => {
-            dismissSuggestion(selectedSuggestion.id, false)
+            if (selectedSuggestion) dismissSuggestion(selectedSuggestion.id)
             setSelectedSuggestion(null)
             setTooltipPosition(null)
           }}
         />
       )}
-    </div>
+      
+      {/* Tone Analysis Panel */}
+      {showToneAnalysis && analysis?.toneAnalysis && (
+        <ToneAnalysisPanel
+          toneAnalysis={analysis.toneAnalysis}
+          isLoading={isRunningToneAnalysis}
+          onClose={() => setShowToneAnalysis(false)}
+        />
+      )}
     </div>
   )
-} 
+}

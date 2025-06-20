@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useState, useMemo, Fragment, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { TextSuggestion } from '../services/textAnalysisService';
 
 interface HighlightedTextAreaProps {
@@ -16,262 +16,272 @@ export default function HighlightedTextArea({
   suggestions,
   onSuggestionClick,
   placeholder,
-  className
+  className = ''
 }: HighlightedTextAreaProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
-  const [hoveredSuggestion, setHoveredSuggestion] = useState<TextSuggestion | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const lastCursorPosition = useRef(0);
+  const isUpdating = useRef(false);
 
-  const handleScroll = useCallback(() => {
-    if (textareaRef.current && highlightRef.current) {
-      const textarea = textareaRef.current;
-      const highlight = highlightRef.current;
+  // Get cursor position in text content
+  const getCursorPosition = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return 0;
+    
+    try {
+      const range = selection.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(editorRef.current!);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
       
-      // Sync scroll position exactly
-      highlight.scrollTop = textarea.scrollTop;
-      highlight.scrollLeft = textarea.scrollLeft;
+      // Use textContent for more accurate positioning and clamp to valid range
+      const textBeforeCursor = preCaretRange.toString();
+      return Math.min(Math.max(0, textBeforeCursor.length), value.length);
+    } catch (error) {
+      // Return a safe fallback position
+      return Math.min(Math.max(0, lastCursorPosition.current), value.length);
+    }
+  }, [value.length]);
+
+  // Set cursor position in text content
+  const setCursorPosition = useCallback((position: number) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    try {
+      const range = document.createRange();
+      let currentPos = 0;
+      let targetNode: Node | null = null;
+      let targetOffset = 0;
+
+      // Walk through all text nodes
+      const walker = document.createTreeWalker(
+        editor,
+        NodeFilter.SHOW_TEXT
+      );
+
+      let node = walker.nextNode();
+      while (node) {
+        const textLength = node.textContent?.length || 0;
+        if (currentPos + textLength >= position) {
+          targetNode = node;
+          targetOffset = position - currentPos;
+          break;
+        }
+        currentPos += textLength;
+        node = walker.nextNode();
+      }
+
+      if (targetNode) {
+        range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent?.length || 0));
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    } catch (error) {
+      // Silently handle cursor positioning errors
     }
   }, []);
 
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      // Add scroll event listener
-      textarea.addEventListener('scroll', handleScroll, { passive: true });
-      
-      // Sync initial scroll position
-      handleScroll();
-      
-      return () => {
-        textarea.removeEventListener('scroll', handleScroll);
-      };
+  // Create highlighted content with proper escaping
+  const createHighlightedContent = useCallback(() => {
+    if (!suggestions.length) {
+      return value.replace(/\n/g, '<br>') || '';
     }
-  }, [handleScroll]);
 
-  useLayoutEffect(() => {
-    const syncStyles = () => {
-      if (textareaRef.current && highlightRef.current) {
-        const textarea = textareaRef.current;
-        const highlight = highlightRef.current;
-        const computedStyle = window.getComputedStyle(textarea);
-        
-        const stylesToCopy = [
-          'fontSize', 'fontFamily', 'fontWeight', 'fontStyle',
-          'lineHeight', 'letterSpacing', 'wordSpacing', 'textIndent',
-          'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-          'borderWidth', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-          'borderRadius', 'boxSizing', 'textAlign', 'textTransform',
-          'whiteSpace', 'wordBreak', 'wordWrap', 'overflowWrap', 'tabSize'
-        ];
-        
-        stylesToCopy.forEach(prop => {
-          const value = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
-          (highlight.style as any)[prop] = value;
-        });
+    // Sort suggestions by position to avoid overlap issues
+    const sortedSuggestions = [...suggestions]
+      .filter(s => s.startIndex >= 0 && s.endIndex <= value.length && s.startIndex < s.endIndex)
+      .sort((a, b) => a.startIndex - b.startIndex);
 
-        // FIXED: Ensure exact positioning and sizing
-        highlight.style.position = 'absolute';
-        highlight.style.top = '0';
-        highlight.style.left = '0';
-        highlight.style.border = `${computedStyle.borderWidth} solid transparent`;
-        highlight.style.width = `${textarea.clientWidth}px`;
-        highlight.style.height = `${textarea.clientHeight}px`;
-        highlight.style.textDecoration = 'none';
-        highlight.style.overflow = 'hidden';
-        highlight.style.pointerEvents = 'none';
-        highlight.style.zIndex = '1';
-        
-        // FIXED: Ensure text rendering matches exactly
-        highlight.style.fontFeatureSettings = computedStyle.fontFeatureSettings;
-        highlight.style.fontVariantLigatures = computedStyle.fontVariantLigatures;
-        highlight.style.textRendering = computedStyle.textRendering;
-        (highlight.style as any).webkitFontSmoothing = (computedStyle as any).webkitFontSmoothing;
-        (highlight.style as any).mozOsxFontSmoothing = (computedStyle as any).mozOsxFontSmoothing;
-        
-        // FIXED: Match exact dimensions and scroll behavior
-        highlight.style.maxHeight = textarea.style.maxHeight || computedStyle.maxHeight;
-        highlight.style.minHeight = textarea.style.minHeight || computedStyle.minHeight;
-        highlight.style.resize = 'none';
-        highlight.style.outline = 'none';
-        
-        // Sync scroll position
-        highlight.scrollTop = textarea.scrollTop;
-        highlight.scrollLeft = textarea.scrollLeft;
-      }
-    };
-
-    syncStyles();
-    
-    // Re-sync on window resize or content changes
-    const handleResize = () => {
-      requestAnimationFrame(syncStyles);
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [className, value, suggestions]);
-
-  const highlightedContent = useMemo(() => {
-    // Create a stable copy of suggestions to work with
-    const suggestionsToRender = [...suggestions];
-    
-    // Validate and filter suggestions to ensure they match the current value
-    const validSuggestions = suggestionsToRender.filter(suggestion => {
-      // Basic range validation
-      if (
-        suggestion.startIndex < 0 || 
-        suggestion.endIndex > value.length || 
-        suggestion.startIndex >= suggestion.endIndex
-      ) {
-        return false;
-      }
-      
-      const actualText = value.slice(suggestion.startIndex, suggestion.endIndex);
-      
-      // Exact match - ideal case
-      if (actualText === suggestion.originalText) {
-        return true;
-      }
-      
-      // Allow for minor differences (whitespace, case, punctuation)
-      const normalizeText = (text: string) => 
-        text.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
-      
-      const normalizedActual = normalizeText(actualText);
-      const normalizedOriginal = normalizeText(suggestion.originalText);
-      
-      if (normalizedActual === normalizedOriginal) {
-        return true;
-      }
-      
-      // For single-word suggestions, allow partial matches
-      if (suggestion.originalText.trim().split(/\s+/).length === 1) {
-        const actualWords = actualText.trim().split(/\s+/);
-        const originalWords = suggestion.originalText.trim().split(/\s+/);
-        
-        // Check if the suggestion word is contained in the actual text
-        if (actualWords.some(word => normalizeText(word) === normalizeText(originalWords[0]))) {
-          return true;
-        }
-      }
-      
-      // If we still don't have a match, skip this suggestion silently
-      // (don't log warning to reduce console noise)
-      return false;
+    // Remove overlapping suggestions
+    const validSuggestions = sortedSuggestions.filter((suggestion, index) => {
+      if (index === 0) return true;
+      const prevSuggestion = sortedSuggestions[index - 1];
+      return suggestion.startIndex >= prevSuggestion.endIndex;
     });
 
-    if (validSuggestions.length === 0) {
-      return value;
+    if (!validSuggestions.length) {
+      return value.replace(/\n/g, '<br>') || '';
     }
 
-    // Sort by start index and filter out any remaining overlaps
-    const sortedSuggestions = validSuggestions
-      .sort((a, b) => a.startIndex - b.startIndex)
-      .filter((suggestion, index, arr) => {
-        if (index === 0) return true;
-        const prev = arr[index - 1];
-        return suggestion.startIndex >= prev.endIndex;
-      });
-    
-    const parts: (string | JSX.Element)[] = [];
+    let result = '';
     let lastIndex = 0;
 
-    sortedSuggestions.forEach((suggestion, index) => {
-      // Add text before this suggestion
-      if (suggestion.startIndex > lastIndex) {
-        parts.push(value.slice(lastIndex, suggestion.startIndex));
-      }
-      
+    validSuggestions.forEach((suggestion) => {
+      // Add text before suggestion
+      const beforeText = value.slice(lastIndex, suggestion.startIndex);
+      result += beforeText.replace(/\n/g, '<br>');
+
+      // Add highlighted suggestion
       const suggestionText = value.slice(suggestion.startIndex, suggestion.endIndex);
+      const colorClass = suggestion.type === 'spelling' ? 'text-red-600 bg-red-100' :
+                        suggestion.type === 'grammar' ? 'text-yellow-600 bg-yellow-100' :
+                        'text-blue-600 bg-blue-100';
       
-      const severityClass = 
-        suggestion.type === 'spelling' ? 'bg-red-200/50 border-b-2 border-red-500' :
-        suggestion.type === 'grammar' ? 'bg-yellow-200/50 border-b-2 border-yellow-500' :
-        suggestion.severity === 'error' ? 'bg-red-200/50 border-b-2 border-red-500' :
-        suggestion.severity === 'warning' ? 'bg-yellow-200/50 border-b-2 border-yellow-500' :
-        'bg-blue-200/50 border-b-2 border-blue-500';
-      
-      parts.push(
-        <span
-          key={`${suggestion.id}-${index}`}
-          className={`${severityClass} cursor-pointer relative inline-block rounded-sm px-0.5`}
-          onClick={(e) => onSuggestionClick(suggestion, e.currentTarget)}
-          title={suggestion.message}
-        >
-          {suggestionText}
-        </span>
-      );
+      result += `<span class="${colorClass} underline decoration-wavy cursor-pointer rounded px-0.5" data-suggestion="${suggestion.id}" title="${suggestion.message.replace(/"/g, '&quot;')}">${suggestionText.replace(/\n/g, '<br>')}</span>`;
       
       lastIndex = suggestion.endIndex;
     });
 
-    // Add remaining text after the last suggestion
-    if (lastIndex < value.length) {
-      parts.push(value.slice(lastIndex));
+    // Add remaining text
+    const remainingText = value.slice(lastIndex);
+    result += remainingText.replace(/\n/g, '<br>');
+
+    return result;
+  }, [value, suggestions]);
+
+  // Handle content changes with cursor position preservation
+  const handleInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
+    if (isUpdating.current) return;
+    
+    const target = e.currentTarget;
+    const text = target.innerText || '';
+    
+    // Store cursor position before updating
+    lastCursorPosition.current = getCursorPosition();
+    
+    onChange(text);
+  }, [onChange, getCursorPosition]);
+
+  // Handle paste to ensure plain text only
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    
+    // Store cursor position
+    lastCursorPosition.current = getCursorPosition();
+    
+    document.execCommand('insertText', false, text);
+  }, [getCursorPosition]);
+
+  // Handle suggestion clicks
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const suggestionId = target.getAttribute('data-suggestion');
+    
+    if (suggestionId) {
+      const suggestion = suggestions.find(s => s.id === suggestionId);
+      if (suggestion) {
+        onSuggestionClick(suggestion, target);
+        return;
+      }
     }
     
-    return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);
-  }, [value, suggestions, onSuggestionClick]);
+    // Update cursor position for regular clicks
+    setTimeout(() => {
+      lastCursorPosition.current = getCursorPosition();
+    }, 0);
+  }, [suggestions, onSuggestionClick, getCursorPosition]);
+
+  // Handle focus events
+  const handleFocus = useCallback(() => {
+    setIsFocused(true);
+    // Restore cursor position when focusing
+    setTimeout(() => {
+      setCursorPosition(lastCursorPosition.current);
+    }, 0);
+  }, [setCursorPosition]);
+
+  const handleBlur = useCallback(() => {
+    setIsFocused(false);
+    lastCursorPosition.current = getCursorPosition();
+  }, [getCursorPosition]);
+
+  // Update highlighting when suggestions change, preserving cursor
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    // Always store current cursor position before updating, regardless of focus
+    const currentPos = getCursorPosition();
+    
+    isUpdating.current = true;
+    const newContent = createHighlightedContent();
+    
+    // Only update if content actually changed to prevent unnecessary re-renders
+    if (editor.innerHTML !== newContent) {
+      editor.innerHTML = newContent;
+      
+      // Restore cursor position with a slight delay to ensure DOM is updated
+      setTimeout(() => {
+        // Only restore cursor if we're focused and position is valid
+        if (isFocused && currentPos >= 0 && currentPos <= value.length) {
+          setCursorPosition(currentPos);
+        }
+        isUpdating.current = false;
+      }, 10); // Slightly longer delay for better stability
+    } else {
+      isUpdating.current = false;
+    }
+  }, [suggestions, createHighlightedContent, isFocused, getCursorPosition, setCursorPosition, value.length]);
+
+  // Update content with cursor preservation when value changes externally
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const currentText = editor.innerText || '';
+    if (currentText !== value) {
+      // Store cursor position before any content changes
+      const currentPos = isFocused ? getCursorPosition() : lastCursorPosition.current;
+      
+      isUpdating.current = true;
+      editor.innerHTML = createHighlightedContent();
+      
+      // Restore cursor position if focused and position is valid
+      if (isFocused && currentPos >= 0 && currentPos <= value.length) {
+        setTimeout(() => {
+          setCursorPosition(currentPos);
+          isUpdating.current = false;
+        }, 10);
+      } else {
+        isUpdating.current = false;
+      }
+    }
+  }, [value, createHighlightedContent, isFocused, setCursorPosition, getCursorPosition]);
+
+  // Initialize content when component mounts
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    
+    if (!editor.innerHTML) {
+      editor.innerHTML = createHighlightedContent();
+    }
+  }, [createHighlightedContent]);
 
   return (
-    <div className="relative">
+    <div className="relative w-full h-full">
       <div
-        ref={highlightRef}
-        className="absolute top-0 left-0 pointer-events-none overflow-hidden"
+        ref={editorRef}
+        contentEditable
+        onInput={handleInput}
+        onPaste={handlePaste}
+        onClick={handleClick}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        className={`
+          w-full h-full resize-none focus:outline-none
+          whitespace-pre-wrap break-words
+          ${className}
+        `}
         style={{
-          color: 'transparent',
-          zIndex: 1,
-          userSelect: 'none'
+          minHeight: '100%',
+          wordBreak: 'break-word',
+          overflowWrap: 'break-word'
         }}
-      >
-        <div className="pointer-events-auto whitespace-pre-wrap break-words">
-          {highlightedContent}
-        </div>
-      </div>
-      
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onScroll={handleScroll}
-        placeholder={placeholder}
-        className={`relative resize-none focus:outline-none bg-transparent ${className}`}
-        style={{
-          zIndex: 2,
-          color: 'rgb(17, 24, 39)',
-          caretColor: 'rgb(17, 24, 39)'
-        }}
-        spellCheck="false"
-        autoCapitalize="false"
-        autoCorrect="false"
+        data-placeholder={placeholder}
+        suppressContentEditableWarning={true}
       />
-
-      {/* Vocabulary hover tooltip */}
-      {hoveredSuggestion && hoveredSuggestion.type === 'vocabulary' && hoveredSuggestion.alternatives && (
-        <div className="absolute bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-10 max-w-xs">
-          <p className="text-sm font-medium text-gray-900 mb-2">Suggested alternatives:</p>
-          <div className="flex flex-wrap gap-1">
-            {hoveredSuggestion.alternatives.map((alt, index) => (
-              <button
-                key={index}
-                onClick={() => {
-                  // Replace word with alternative
-                  const newValue = 
-                    value.substring(0, hoveredSuggestion.startIndex) + 
-                    alt + 
-                    value.substring(hoveredSuggestion.endIndex);
-                  onChange(newValue);
-                  setHoveredSuggestion(null);
-                }}
-                className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100"
-              >
-                {alt}
-              </button>
-            ))}
-          </div>
+      
+      {/* Placeholder */}
+      {!value && placeholder && (
+        <div className="absolute top-0 left-0 pointer-events-none text-gray-400 whitespace-pre-wrap">
+          {placeholder}
         </div>
       )}
     </div>

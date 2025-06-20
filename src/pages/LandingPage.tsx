@@ -1,215 +1,167 @@
 import { Link } from 'react-router-dom'
-import { PenTool, Target, Star, CheckCircle, FileText, BarChart3 } from 'lucide-react'
+import { CheckCircle, Zap, ShieldCheck, BarChart3, Feather, Award } from 'lucide-react'
+import Header from '../components/Header'
 
 export default function LandingPage() {
+  const features = [
+    {
+      icon: <Zap className="h-8 w-8 text-white" />,
+      title: 'Real-Time Suggestions',
+      description: 'Get instant feedback on grammar, spelling, and style as you type.',
+      color: 'bg-blue-500',
+    },
+    {
+      icon: <BarChart3 className="h-8 w-8 text-white" />,
+      title: 'Advanced Tone Analysis',
+      description: 'Ensure your writing strikes the perfect tone for your audience.',
+      color: 'bg-green-500',
+    },
+    {
+      icon: <ShieldCheck className="h-8 w-8 text-white" />,
+      title: '99% Accuracy',
+      description: 'Our AI provides highly accurate suggestions you can trust.',
+      color: 'bg-indigo-500',
+    },
+    {
+      icon: <Feather className="h-8 w-8 text-white" />,
+      title: 'Clean & Simple UI',
+      description: 'A distraction-free interface to help you focus on what matters: your writing.',
+      color: 'bg-purple-500',
+    },
+    {
+      icon: <Award className="h-8 w-8 text-white" />,
+      title: 'Multiple Essay Types',
+      description: 'Support for various essay types including personal statements, supplemental essays, and cover letters.',
+      color: 'bg-pink-500',
+    },
+    {
+      icon: <CheckCircle className="h-8 w-8 text-white" />,
+      title: 'Word Limit Management',
+      description: 'Stay within college application word limits with real-time word counting and progress indicators.',
+      color: 'bg-red-500',
+    },
+  ];
+
   return (
-    <div className="bg-white">
+    <div className="min-h-screen bg-gray-50 text-gray-800">
+      <Header />
+
       {/* Hero Section */}
-      <section className="relative pt-12 pb-20 sm:pt-16 sm:pb-24">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
-              Write with intelligence.
-              <br />
-              <span className="text-primary-600">Perfect with AI.</span>
-            </h1>
-            <p className="mt-6 text-xl text-gray-600 max-w-3xl mx-auto">
-              WordWise is an AI-powered writing assistant designed for high school students. 
-              Get real-time grammar checking, style suggestions, and readability analysis to perfect your college application essays.
-            </p>
-            <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                to="/signup"
-                className="px-8 py-4 bg-primary-600 text-white text-lg font-semibold rounded-lg hover:bg-primary-700 transition-colors"
-              >
-                Start Writing for Free
-              </Link>
-              <Link
-                to="/login"
-                className="px-8 py-4 border-2 border-gray-300 text-gray-700 text-lg font-semibold rounded-lg hover:border-gray-400 transition-colors"
-              >
-                Already have an account?
-              </Link>
+      <main>
+        <section className="relative pt-20 pb-24 sm:pt-24 sm:pb-32">
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute top-0 left-0 w-[150%] h-[150%] bg-gradient-to-br from-blue-50 via-white to-indigo-100 transform -skew-y-6 -translate-y-1/4"></div>
+          </div>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+            <div className="text-center">
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight">
+                Craft Your Story,
+                <br />
+                <span className="text-blue-600">Perfect Your Pitch.</span>
+              </h1>
+              <p className="mt-6 text-lg text-gray-600 max-w-2xl mx-auto">
+                WordWise is your AI-powered co-pilot for writing standout college application essays.
+                Go beyond grammar and spelling to refine your tone, style, and impact.
+              </p>
+              <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+                <Link
+                  to="/signup"
+                  className="px-8 py-3 bg-blue-600 text-white text-lg font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-all transform hover:scale-105"
+                >
+                  Get Started for Free
+                </Link>
+                <Link
+                  to="/login"
+                  className="px-8 py-3 bg-white text-gray-700 text-lg font-semibold rounded-lg shadow-md hover:bg-gray-100 transition-all"
+                >
+                  Sign In
+                </Link>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Features Section */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
+        {/* Features Section */}
+        <section id="features" className="py-20">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
+                Everything You Need to Succeed
+              </h2>
+              <p className="mt-4 text-xl text-gray-600 max-w-3xl mx-auto">
+                WordWise provides a comprehensive suite of tools to elevate your writing.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {features.map((feature, index) => (
+                <div
+                  key={index}
+                  className="bg-white p-8 rounded-xl shadow-lg border border-gray-200/80 transform hover:-translate-y-2 transition-transform duration-300"
+                >
+                  <div
+                    className={`w-14 h-14 ${feature.color} rounded-lg flex items-center justify-center mb-6 shadow-md`}
+                  >
+                    {feature.icon}
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                    {feature.title}
+                  </h3>
+                  <p className="text-gray-600">
+                    {feature.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Testimonial Section */}
+        <section className="py-20 bg-gray-100">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <img
+              src="https://randomuser.me/api/portraits/women/68.jpg"
+              alt="Testimonial user"
+              className="w-20 h-20 rounded-full mx-auto mb-4 border-4 border-white shadow-lg"
+            />
+            <blockquote className="text-xl text-gray-800 italic">
+              "WordWise was a game-changer for my college essays. The AI suggestions helped me catch mistakes I would have missed and made my writing so much stronger. I got into my dream school!"
+            </blockquote>
+            <p className="mt-4 font-semibold text-gray-900">Jessica L.</p>
+            <p className="text-gray-600">Accepted to Stanford University</p>
+          </div>
+        </section>
+
+        {/* CTA Section */}
+        <section className="py-24 bg-white">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-              AI-Powered Writing Assistant Features
+              Ready to Elevate Your Writing?
             </h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Advanced grammar checking, style suggestions, and intelligent writing analysis
+            <p className="text-xl text-gray-600 mb-8">
+              Start your journey with WordWise today and write with unparalleled confidence.
             </p>
+            <Link
+              to="/signup"
+              className="inline-flex items-center px-10 py-4 bg-blue-600 text-white text-lg font-semibold rounded-lg shadow-lg hover:bg-blue-700 transition-transform transform hover:scale-105"
+            >
+              Sign Up and Start Writing
+            </Link>
           </div>
-          
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {/* Feature 1: Grammar Checking */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center mb-6">
-                <CheckCircle className="h-6 w-6 text-red-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Real-time Grammar Checking
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Advanced grammar analysis with 85%+ accuracy catches errors as you type, ensuring your writing is polished and professional.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Subject-verb agreement<br/>
-                ✓ Sentence fragment detection<br/>
-                ✓ Run-on sentence alerts
-              </div>
-            </div>
+        </section>
+      </main>
 
-            {/* Feature 2: Spell Checking */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-6">
-                <FileText className="h-6 w-6 text-blue-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Intelligent Spell Checking
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Advanced spell checking with contextual suggestions helps you choose the right words and avoid common mistakes.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Contextual corrections<br/>
-                ✓ Multiple suggestions<br/>
-                ✓ Instant error highlighting
-              </div>
-            </div>
-
-            {/* Feature 3: Style Analysis */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-6">
-                <BarChart3 className="h-6 w-6 text-green-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Style & Readability Analysis
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Get suggestions to improve your writing style, eliminate weak words, and enhance readability for your target audience.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Readability scoring<br/>
-                ✓ Style improvements<br/>
-                ✓ Sentence variety analysis
-              </div>
-            </div>
-
-            {/* Feature 4: Clean Interface */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-6">
-                <PenTool className="h-6 w-6 text-orange-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Clean Writing Interface
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Focus on your writing with a distraction-free editor designed for personal statement writing.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Distraction-free design<br/>
-                ✓ Focus on content<br/>
-                ✓ Comfortable writing environment
-              </div>
-            </div>
-
-            {/* Feature 5: Word Limits */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center mb-6">
-                <Target className="h-6 w-6 text-red-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Word Limit Management
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Stay within college application word limits with real-time word counting and progress indicators.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Real-time word counting<br/>
-                ✓ Limit notifications<br/>
-                ✓ Progress indicators
-              </div>
-            </div>
-
-            {/* Feature 6: Multiple Essays */}
-            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-6">
-                <Star className="h-6 w-6 text-yellow-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                Multiple Essay Types
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Support for various essay types including personal statements, supplemental essays, and cover letters.
-              </p>
-              <div className="text-sm text-gray-500">
-                ✓ Personal statements<br/>
-                ✓ Supplemental essays<br/>
-                ✓ Cover letters
-              </div>
+      {/* Footer */}
+      <footer className="bg-gray-800 text-white">
+        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center">
+            <p>&copy; {new Date().getFullYear()} WordWise AI. All rights reserved.</p>
+            <div className="flex space-x-4">
+              <Link to="#" className="hover:text-gray-300">Privacy Policy</Link>
+              <Link to="#" className="hover:text-gray-300">Terms of Service</Link>
             </div>
           </div>
         </div>
-      </section>
-
-      {/* Stats Section */}
-      <section className="py-20 bg-primary-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              Powered by advanced AI technology
-            </h2>
-            <p className="text-xl text-gray-600">
-              WordWise delivers industry-leading accuracy and performance for student writers
-            </p>
-          </div>
-          
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
-            <div className="text-center">
-              <div className="text-4xl font-bold text-primary-600 mb-2">85%+</div>
-              <div className="text-gray-600">Grammar accuracy</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-primary-600 mb-2">&lt;2s</div>
-              <div className="text-gray-600">Response time</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-primary-600 mb-2">Real-time</div>
-              <div className="text-gray-600">Suggestions</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-primary-600 mb-2">Smart</div>
-              <div className="text-gray-600">Style analysis</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 bg-gray-900">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-6">
-            Ready to write your best personal statement?
-          </h2>
-          <p className="text-xl text-gray-300 mb-10">
-            Join students who are using WordWise to organize their essays and stay on top of their college applications.
-          </p>
-          <Link
-            to="/signup"
-            className="inline-flex items-center px-8 py-4 bg-primary-600 text-white text-lg font-semibold rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <PenTool className="h-5 w-5 mr-2" />
-            Start Writing for Free
-          </Link>
-        </div>
-      </section>
+      </footer>
     </div>
   )
 } 

@@ -43,27 +43,29 @@ export default function EditorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {currentDocument?.title || 'Loading...'}
-              </h1>
-              <p className="text-gray-600">
-                Clean, distraction-free writing environment for your personal statement
-              </p>
-            </div>
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              ← Back to Dashboard
-            </button>
+    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-semibold text-gray-900 truncate">
+              {currentDocument?.title || 'Loading...'}
+            </h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Clean, distraction-free writing environment for your personal statement
+            </p>
           </div>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="ml-4 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            ← Back to Dashboard
+          </button>
         </div>
-        
+      </div>
+      
+      {/* Editor Container - Takes remaining height */}
+      <div className="flex-1 min-h-0">
         <WritingEditor documentId={documentId} />
       </div>
     </div>
