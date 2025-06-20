@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { useFirebaseAuthStore } from './firebaseAuthStore'
+import { useFirebaseAuthStore, AuthState } from './firebaseAuthStore'
 import toast from 'react-hot-toast'
 import { v4 as uuidv4 } from 'uuid'
 import { db, isDevelopment } from '../lib/firebase'
@@ -11,7 +11,8 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  where 
+  where,
+  serverTimestamp
 } from 'firebase/firestore'
 
 // Define Document type locally
@@ -39,7 +40,10 @@ interface DocumentState {
   currentDocument: Document | null
   loading: boolean
   error: string | null
+  isInitialized: boolean; // Track if store has been initialized with auth state
   // Actions
+  init: () => void; // New initializer
+  clearDocuments: () => void; // New action to clear state
   loadDocuments: () => Promise<void>
   createDocument: (title: string, writingGoal?: string) => Promise<string>
   updateDocument: (id: string, updates: Partial<Document>) => Promise<void>
@@ -48,21 +52,68 @@ interface DocumentState {
   saveDocument: (id: string, content: string) => Promise<void>
 }
 
+let authListenerUnsubscribe: (() => void) | null = null;
+
 export const useDocumentStore = create<DocumentState>((set, get) => ({
   documents: [],
   currentDocument: null,
   loading: false,
   error: null,
+  isInitialized: false,
+
+  init: () => {
+    if (get().isInitialized || authListenerUnsubscribe) {
+      console.log('Document store already initialized.');
+      return;
+    }
+
+    console.log('🔄 Initializing document store and subscribing to auth changes...');
+
+    const handleAuthChange = (user: AuthState['user']) => {
+      console.log('🔔 Document store received auth state change:', user ? user.uid : 'null');
+      if (user) {
+        get().loadDocuments();
+      } else {
+        get().clearDocuments();
+      }
+    };
+
+    // Subscribe to the auth store
+    authListenerUnsubscribe = useFirebaseAuthStore.subscribe(
+      (state) => state.user,
+      handleAuthChange
+    );
+
+    // Initial check
+    const initialUser = useFirebaseAuthStore.getState().user;
+    if (initialUser) {
+      handleAuthChange(initialUser);
+    }
+
+    set({ isInitialized: true });
+  },
+
+  clearDocuments: () => {
+    console.log('🧹 Clearing all documents and current document.');
+    set({
+      documents: [],
+      currentDocument: null,
+      loading: false,
+      error: null
+    });
+  },
 
   loadDocuments: async () => {
-    try {
-      set({ loading: true, error: null })
-      
-      const user = useFirebaseAuthStore.getState().user
-      if (!user) {
-        throw new Error('User not authenticated')
-      }
+    const user = useFirebaseAuthStore.getState().user;
+    if (!user) {
+      console.log('loadDocuments skipped: no authenticated user.');
+      // Don't throw an error, just return. The store will be cleared by `clearDocuments`.
+      return;
+    }
+    
+    set({ loading: true, error: null });
 
+    try {
       if (isDevelopment) {
         // Development mode: use localStorage
         console.log('Development mode: Loading documents from localStorage')
@@ -142,17 +193,18 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     } catch (error: any) {
       console.error('Failed to load documents:', error)
       set({ error: error.message, loading: false })
-      toast.error('Failed to load documents')
+      // toast.error('Failed to load documents'); // Let's not toast on initial load failure, it can be aggressive.
     }
   },
 
   createDocument: async (title: string, writingGoal = 'personal-statement') => {
+    const user = useFirebaseAuthStore.getState().user;
+    if (!user) {
+      toast.error('You must be logged in to create a document.');
+      throw new Error('User not authenticated');
+    }
+    
     try {
-      const user = useFirebaseAuthStore.getState().user
-      if (!user) {
-        throw new Error('User not authenticated')
-      }
-
       console.log('Creating document with Firebase config. isDevelopment:', isDevelopment)
 
       if (isDevelopment) {
@@ -233,16 +285,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   updateDocument: async (id: string, updates: Partial<Document>) => {
-    try {
-      const user = useFirebaseAuthStore.getState().user
-      if (!user) {
-        throw new Error('User not authenticated')
-      }
+    const user = useFirebaseAuthStore.getState().user;
+    if (!user) {
+      toast.error('You must be logged in to update a document.');
+      throw new Error('User not authenticated');
+    }
 
+    try {
       const updatedData = {
         ...updates,
         updatedAt: new Date().toISOString()
-      }
+      };
 
       if (isDevelopment) {
         // Development mode: use localStorage
@@ -268,23 +321,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         console.log('Document updated in localStorage:', updatedDoc)
       } else {
         // Production mode: use Firebase Firestore
-        await updateDoc(doc(db, 'documents', id), updatedData)
-
-        const documents = get().documents
-        const docIndex = documents.findIndex(doc => doc.id === id)
+        const docRef = doc(db, 'documents', id);
         
-        if (docIndex !== -1) {
-          const updatedDoc = { ...documents[docIndex], ...updatedData }
-          const newDocuments = [...documents]
-          newDocuments[docIndex] = updatedDoc
-
-          set({ documents: newDocuments })
-
-          if (get().currentDocument?.id === id) {
-            set({ currentDocument: updatedDoc })
-          }
+        // Ensure the document belongs to the current user before updating
+        // Note: This is client-side validation. Use Firestore rules for security.
+        const currentDoc = get().documents.find(d => d.id === id);
+        if (currentDoc && currentDoc.userId !== user.uid) {
+          throw new Error("Permission denied: You don't own this document.");
         }
-        console.log('Document updated in Firestore')
+        
+        await updateDoc(docRef, updatedData);
+        console.log('Document updated in Firestore:', id);
       }
     } catch (error: any) {
       console.error('Failed to update document:', error)
@@ -294,12 +341,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   deleteDocument: async (id: string) => {
+    const user = useFirebaseAuthStore.getState().user;
+    if (!user) {
+      toast.error('You must be logged in to delete a document.');
+      throw new Error('User not authenticated');
+    }
+    
     try {
-      const user = useFirebaseAuthStore.getState().user
-      if (!user) {
-        throw new Error('User not authenticated')
-      }
-
       if (isDevelopment) {
         // Development mode: use localStorage
         const documents = get().documents
@@ -316,24 +364,26 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         console.log('Document deleted from localStorage')
       } else {
         // Production mode: use Firebase Firestore
-        await deleteDoc(doc(db, 'documents', id))
+        const docRef = doc(db, 'documents', id);
 
-        const documents = get().documents
-        const newDocuments = documents.filter(doc => doc.id !== id)
-
-        set({ documents: newDocuments })
-
-        if (get().currentDocument?.id === id) {
-          set({ currentDocument: null })
+        const currentDoc = get().documents.find(d => d.id === id);
+        if (currentDoc && currentDoc.userId !== user.uid) {
+          throw new Error("Permission denied: You don't own this document.");
         }
-        console.log('Document deleted from Firestore')
+
+        await deleteDoc(docRef);
+        console.log('Document deleted from Firestore:', id);
+      }
+
+      // If the deleted document was the current one, clear it
+      if (get().currentDocument?.id === id) {
+        set({ currentDocument: null });
       }
 
       toast.success('🗑️ Document deleted successfully')
     } catch (error: any) {
       console.error('Failed to delete document:', error)
-      toast.error('Failed to delete document')
-      throw error
+      toast.error(`Failed to delete document: ${error.message}`)
     }
   },
 
@@ -343,15 +393,26 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   saveDocument: async (id: string, content: string) => {
     try {
-      await get().updateDocument(id, { 
-        content, 
-        wordCount: content.trim().split(/\s+/).length,
-        updatedAt: new Date().toISOString()
-      })
+      const currentDoc = get().documents.find(doc => doc.id === id);
+      if (!currentDoc) {
+        throw new Error('Document not found');
+      }
+
+      // Avoid saving if content is unchanged
+      if (currentDoc.content === content) {
+        return;
+      }
+      
+      const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
+
+      await get().updateDocument(id, { content, wordCount });
+
+      // No toast needed for auto-save to avoid being noisy
+      console.log(`📝 Document ${id} auto-saved.`);
+
     } catch (error: any) {
       console.error('Failed to save document:', error)
-      toast.error('Failed to save document')
-      throw error
+      toast.error(`Failed to save document: ${error.message}`)
     }
   }
 }))

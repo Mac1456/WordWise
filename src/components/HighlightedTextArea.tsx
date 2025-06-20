@@ -1,11 +1,11 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useLayoutEffect, useState, useMemo, Fragment, useCallback } from 'react';
 import { TextSuggestion } from '../services/textAnalysisService';
 
 interface HighlightedTextAreaProps {
   value: string;
   onChange: (value: string) => void;
   suggestions: TextSuggestion[];
-  onSuggestionClick: (suggestion: TextSuggestion) => void;
+  onSuggestionClick: (suggestion: TextSuggestion, target: HTMLElement) => void;
   placeholder?: string;
   className?: string;
 }
@@ -22,199 +22,231 @@ export default function HighlightedTextArea({
   const highlightRef = useRef<HTMLDivElement>(null);
   const [hoveredSuggestion, setHoveredSuggestion] = useState<TextSuggestion | null>(null);
 
-  // Sync scroll between textarea and highlight overlay
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     if (textareaRef.current && highlightRef.current) {
-      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
-      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+      const textarea = textareaRef.current;
+      const highlight = highlightRef.current;
+      
+      // Sync scroll position exactly
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
     }
-  };
+  }, []);
 
-  // Sync styles between textarea and highlight overlay
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Add scroll event listener
+      textarea.addEventListener('scroll', handleScroll, { passive: true });
+      
+      // Sync initial scroll position
+      handleScroll();
+      
+      return () => {
+        textarea.removeEventListener('scroll', handleScroll);
+      };
+    }
+  }, [handleScroll]);
+
+  useLayoutEffect(() => {
     const syncStyles = () => {
       if (textareaRef.current && highlightRef.current) {
         const textarea = textareaRef.current;
         const highlight = highlightRef.current;
-        
-        // Get computed styles from textarea
         const computedStyle = window.getComputedStyle(textarea);
         
-        // Apply exact styles to highlight overlay
         const stylesToCopy = [
           'fontSize', 'fontFamily', 'fontWeight', 'fontStyle',
           'lineHeight', 'letterSpacing', 'wordSpacing', 'textIndent',
           'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-          'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
           'borderWidth', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
           'borderRadius', 'boxSizing', 'textAlign', 'textTransform',
-          'whiteSpace', 'wordBreak', 'wordWrap', 'overflowWrap'
+          'whiteSpace', 'wordBreak', 'wordWrap', 'overflowWrap', 'tabSize'
         ];
         
         stylesToCopy.forEach(prop => {
-          if (prop === 'borderWidth' || prop.includes('border')) {
-            // Make borders transparent to maintain spacing without visual border
-            if (prop === 'borderWidth') {
-              highlight.style.border = `${computedStyle.borderWidth} solid transparent`;
-            } else {
-              (highlight.style as any)[prop] = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
-            }
-          } else {
-            (highlight.style as any)[prop] = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
-          }
+          const value = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
+          (highlight.style as any)[prop] = value;
         });
-        
-        // Ensure exact positioning and dimensions
-        const rect = textarea.getBoundingClientRect();
+
+        // FIXED: Ensure exact positioning and sizing
+        highlight.style.position = 'absolute';
+        highlight.style.top = '0';
+        highlight.style.left = '0';
+        highlight.style.border = `${computedStyle.borderWidth} solid transparent`;
         highlight.style.width = `${textarea.clientWidth}px`;
         highlight.style.height = `${textarea.clientHeight}px`;
-        
-        // Ensure text decoration is removed from highlights
         highlight.style.textDecoration = 'none';
+        highlight.style.overflow = 'hidden';
+        highlight.style.pointerEvents = 'none';
+        highlight.style.zIndex = '1';
+        
+        // FIXED: Ensure text rendering matches exactly
+        highlight.style.fontFeatureSettings = computedStyle.fontFeatureSettings;
+        highlight.style.fontVariantLigatures = computedStyle.fontVariantLigatures;
+        highlight.style.textRendering = computedStyle.textRendering;
+        (highlight.style as any).webkitFontSmoothing = (computedStyle as any).webkitFontSmoothing;
+        (highlight.style as any).mozOsxFontSmoothing = (computedStyle as any).mozOsxFontSmoothing;
+        
+        // FIXED: Match exact dimensions and scroll behavior
+        highlight.style.maxHeight = textarea.style.maxHeight || computedStyle.maxHeight;
+        highlight.style.minHeight = textarea.style.minHeight || computedStyle.minHeight;
+        highlight.style.resize = 'none';
+        highlight.style.outline = 'none';
+        
+        // Sync scroll position
+        highlight.scrollTop = textarea.scrollTop;
+        highlight.scrollLeft = textarea.scrollLeft;
       }
     };
 
-    // Sync immediately and after various delays
     syncStyles();
     
-    const timers = [
-      setTimeout(syncStyles, 1),
-      setTimeout(syncStyles, 10),
-      setTimeout(syncStyles, 50),
-      setTimeout(syncStyles, 100),
-      setTimeout(syncStyles, 200)
-    ];
+    // Re-sync on window resize or content changes
+    const handleResize = () => {
+      requestAnimationFrame(syncStyles);
+    };
     
-    // Also sync on window resize
-    const handleResize = () => syncStyles();
     window.addEventListener('resize', handleResize);
     
     return () => {
-      timers.forEach(timer => clearTimeout(timer));
       window.removeEventListener('resize', handleResize);
     };
-  }, [className, value, suggestions]); // Re-sync when className, value, or suggestions change
+  }, [className, value, suggestions]);
 
-  // Memoize highlighted content for better performance
   const highlightedContent = useMemo(() => {
-    // Early return for no suggestions - improves performance
-    if (!suggestions.length) {
-      return value.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
-    }
-
-    // Filter out suggestions with invalid indices or empty text
-    const validSuggestions = suggestions.filter(suggestion => {
-      const suggestionText = value.slice(suggestion.startIndex, suggestion.endIndex);
-      return (
-        suggestion.startIndex >= 0 &&
-        suggestion.endIndex <= value.length &&
-        suggestion.startIndex < suggestion.endIndex &&
-        suggestionText.trim().length > 0 // Don't highlight empty or whitespace-only text
-      );
+    // Create a stable copy of suggestions to work with
+    const suggestionsToRender = [...suggestions];
+    
+    // Validate and filter suggestions to ensure they match the current value
+    const validSuggestions = suggestionsToRender.filter(suggestion => {
+      // Basic range validation
+      if (
+        suggestion.startIndex < 0 || 
+        suggestion.endIndex > value.length || 
+        suggestion.startIndex >= suggestion.endIndex
+      ) {
+        return false;
+      }
+      
+      const actualText = value.slice(suggestion.startIndex, suggestion.endIndex);
+      
+      // Exact match - ideal case
+      if (actualText === suggestion.originalText) {
+        return true;
+      }
+      
+      // Allow for minor differences (whitespace, case, punctuation)
+      const normalizeText = (text: string) => 
+        text.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+      
+      const normalizedActual = normalizeText(actualText);
+      const normalizedOriginal = normalizeText(suggestion.originalText);
+      
+      if (normalizedActual === normalizedOriginal) {
+        return true;
+      }
+      
+      // For single-word suggestions, allow partial matches
+      if (suggestion.originalText.trim().split(/\s+/).length === 1) {
+        const actualWords = actualText.trim().split(/\s+/);
+        const originalWords = suggestion.originalText.trim().split(/\s+/);
+        
+        // Check if the suggestion word is contained in the actual text
+        if (actualWords.some(word => normalizeText(word) === normalizeText(originalWords[0]))) {
+          return true;
+        }
+      }
+      
+      // If we still don't have a match, skip this suggestion silently
+      // (don't log warning to reduce console noise)
+      return false;
     });
 
-    if (!validSuggestions.length) {
-      return value.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+    if (validSuggestions.length === 0) {
+      return value;
     }
 
-    // Sort suggestions by start index and remove overlaps
-    const sortedSuggestions = [...validSuggestions]
+    // Sort by start index and filter out any remaining overlaps
+    const sortedSuggestions = validSuggestions
       .sort((a, b) => a.startIndex - b.startIndex)
       .filter((suggestion, index, arr) => {
-        // Remove overlapping suggestions (keep the first one)
         if (index === 0) return true;
         const prev = arr[index - 1];
         return suggestion.startIndex >= prev.endIndex;
       });
     
-    let result = '';
+    const parts: (string | JSX.Element)[] = [];
     let lastIndex = 0;
 
-    sortedSuggestions.forEach((suggestion) => {
-      // Add text before suggestion
-      const beforeText = value.slice(lastIndex, suggestion.startIndex);
-      result += beforeText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+    sortedSuggestions.forEach((suggestion, index) => {
+      // Add text before this suggestion
+      if (suggestion.startIndex > lastIndex) {
+        parts.push(value.slice(lastIndex, suggestion.startIndex));
+      }
       
-      // Add highlighted suggestion
       const suggestionText = value.slice(suggestion.startIndex, suggestion.endIndex);
-      const severityClass = 
-        suggestion.severity === 'error' ? 'bg-red-100 border-b-2 border-red-400' :
-        suggestion.severity === 'warning' ? 'bg-yellow-100 border-b-2 border-yellow-400' :
-        'bg-blue-100 border-b-2 border-blue-400';
       
-      result += `<span 
-        class="${severityClass} cursor-pointer relative inline-block rounded px-0.5"
-        data-suggestion-id="${suggestion.id}"
-        title="${suggestion.message.replace(/"/g, '&quot;')}"
-      >${suggestionText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')}</span>`;
+      const severityClass = 
+        suggestion.type === 'spelling' ? 'bg-red-200/50 border-b-2 border-red-500' :
+        suggestion.type === 'grammar' ? 'bg-yellow-200/50 border-b-2 border-yellow-500' :
+        suggestion.severity === 'error' ? 'bg-red-200/50 border-b-2 border-red-500' :
+        suggestion.severity === 'warning' ? 'bg-yellow-200/50 border-b-2 border-yellow-500' :
+        'bg-blue-200/50 border-b-2 border-blue-500';
+      
+      parts.push(
+        <span
+          key={`${suggestion.id}-${index}`}
+          className={`${severityClass} cursor-pointer relative inline-block rounded-sm px-0.5`}
+          onClick={(e) => onSuggestionClick(suggestion, e.currentTarget)}
+          title={suggestion.message}
+        >
+          {suggestionText}
+        </span>
+      );
       
       lastIndex = suggestion.endIndex;
     });
 
-    // Add remaining text
-    const remainingText = value.slice(lastIndex);
-    result += remainingText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
-    
-    return result;
-  }, [value, suggestions]); // Only recalculate when value or suggestions change
-
-  // Handle clicks on highlighted suggestions
-  useEffect(() => {
-    const handleHighlightClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const suggestionId = target.getAttribute('data-suggestion-id');
-      
-      if (suggestionId) {
-        const suggestion = suggestions.find(s => s.id === suggestionId);
-        if (suggestion) {
-          onSuggestionClick(suggestion);
-        }
-      }
-    };
-
-    const highlightDiv = highlightRef.current;
-    if (highlightDiv) {
-      highlightDiv.addEventListener('click', handleHighlightClick);
-      return () => highlightDiv.removeEventListener('click', handleHighlightClick);
+    // Add remaining text after the last suggestion
+    if (lastIndex < value.length) {
+      parts.push(value.slice(lastIndex));
     }
-  }, [suggestions, onSuggestionClick]);
+    
+    return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);
+  }, [value, suggestions, onSuggestionClick]);
 
   return (
     <div className="relative">
-      {/* Highlight overlay - positioned behind textarea */}
       <div
         ref={highlightRef}
-        className="absolute top-0 left-0 pointer-events-none overflow-hidden whitespace-pre-wrap break-words"
+        className="absolute top-0 left-0 pointer-events-none overflow-hidden"
         style={{
           color: 'transparent',
           zIndex: 1,
-          width: '100%',
-          height: '100%',
-          background: 'transparent',
           userSelect: 'none'
         }}
-        onScroll={handleScroll}
       >
-        <div 
-          className="pointer-events-auto"
-          dangerouslySetInnerHTML={{ __html: highlightedContent }}
-        />
+        <div className="pointer-events-auto whitespace-pre-wrap break-words">
+          {highlightedContent}
+        </div>
       </div>
       
-      {/* Actual textarea - positioned above highlights */}
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onScroll={handleScroll}
         placeholder={placeholder}
-        className={`relative resize-none focus:outline-none ${className}`}
+        className={`relative resize-none focus:outline-none bg-transparent ${className}`}
         style={{
           zIndex: 2,
-          background: 'transparent',
-          color: 'rgb(17, 24, 39)', // text-gray-900
+          color: 'rgb(17, 24, 39)',
           caretColor: 'rgb(17, 24, 39)'
         }}
+        spellCheck="false"
+        autoCapitalize="false"
+        autoCorrect="false"
       />
 
       {/* Vocabulary hover tooltip */}

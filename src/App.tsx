@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { useFirebaseAuthStore } from './stores/firebaseAuthStore'
+import { useDocumentStore } from './stores/documentStore'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
@@ -12,10 +13,13 @@ import AccountPage from './pages/AccountPage'
 
 function App() {
   const { initialize } = useFirebaseAuthStore()
+  const { init: initDocStore } = useDocumentStore()
 
   useEffect(() => {
     // Initialize Firebase authentication system
     const unsubscribe = initialize()
+    // Initialize the document store to react to auth changes
+    initDocStore()
     
     // Cleanup on unmount
     return () => {
@@ -23,7 +27,7 @@ function App() {
         unsubscribe()
       }
     }
-  }, [initialize])
+  }, [initialize, initDocStore])
 
   return (
     <>

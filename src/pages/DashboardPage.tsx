@@ -17,13 +17,9 @@ const formatDate = (date: Date) => {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { user } = useFirebaseAuthStore()
-  const { documents, loadDocuments, createDocument, deleteDocument, loading } = useDocumentStore()
+  const { documents, createDocument, deleteDocument, loading } = useDocumentStore()
   const [isCreating, setIsCreating] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
-
-  useEffect(() => {
-    loadDocuments()
-  }, [loadDocuments])
 
   const handleCreateDocument = async () => {
     if (!user || !newDocTitle.trim()) {

@@ -82,60 +82,49 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     }
   }, [currentDocument, updateDocument])
 
-  // Optimized text analysis with better debouncing and conflict prevention
+  // Simple hash function for content comparison
+  const hashContent = (content: string): string => {
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString();
+  };
+
+  // Auto-analysis with debouncing
   useEffect(() => {
-      if (!content.trim()) {
-      setAnalysis(null)
-      setIsAutoAnalyzing(false)
-      setAnalysisInProgress(false)
-      setLastAnalyzedContent('')
-        return
-      }
-
-    // Skip analysis for very short text (less than meaningful sentence)
-    if (content.trim().length < 15) {
-      setAnalysis(null)
-      return
-    }
-
-    // Skip analysis if content hasn't actually changed
-    if (content === lastAnalyzedContent) {
-      return
-    }
-
-    // Skip if any analysis is in progress
-    if (analysisInProgress || isAnalyzing || isAutoAnalyzing || isApplyingSuggestion) {
-      console.log('⏳ Analysis blocked - another operation in progress')
-      return
-    }
-
-    // Clear any existing analysis timeout
+    // Clear any existing timeout
     if (analysisTimeout) {
       clearTimeout(analysisTimeout)
+      setAnalysisTimeout(null)
     }
 
-    const analyzeTimer = setTimeout(async () => {
-      // Final check before starting analysis
-      if (analysisInProgress || isAnalyzing || isAutoAnalyzing || isApplyingSuggestion) {
-        console.log('⏳ Analysis blocked - operation in progress')
-        return
-      }
+    // Skip analysis if already in progress
+    if (analysisInProgress || isAutoAnalyzing) {
+      console.log('⏳ Analysis blocked - operation in progress')
+      return
+    }
 
-      // Skip if content hasn't changed since last analysis
-      if (content === lastAnalyzedContent) {
-        console.log('⏸️ Content unchanged, skipping analysis')
-          return
-        }
+    // Skip if content hasn't changed since last analysis (using hash for better comparison)
+    const contentHash = hashContent(content.trim())
+    const lastHash = hashContent(lastAnalyzedContent.trim())
+    if (contentHash === lastHash && content.trim() === lastAnalyzedContent.trim()) {
+      console.log('⏸️ Content unchanged, skipping analysis')
+      return
+    }
 
-      if (content.trim().length >= 15) {
-        // Store the content we're analyzing
-        const contentToAnalyze = content;
-        
-        // Set all blocking flags immediately
-        setAnalysisInProgress(true)
-        setIsAutoAnalyzing(true)
-        setLastAnalyzedContent(contentToAnalyze)
-        
+    if (content.trim().length >= 15) {
+      // Store the content we're analyzing
+      const contentToAnalyze = content;
+      
+      // Set all blocking flags immediately
+      setAnalysisInProgress(true)
+      setIsAutoAnalyzing(true)
+      setLastAnalyzedContent(contentToAnalyze)
+      
+      const analyzeTimer = setTimeout(async () => {
         try {
           console.log(`🚀 Starting unified analysis for: "${contentToAnalyze.slice(0, 30)}..."`)
           
@@ -143,37 +132,41 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           const instantResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
           console.log(`⚡ Instant suggestions: ${instantResult.suggestions.length}`)
           
-          // Always show instant results immediately
-          setAnalysis(instantResult);
+          // Update analysis with instant results, preserving existing structure
+          setAnalysis(prevAnalysis => ({
+            ...instantResult,
+            suggestions: instantResult.suggestions
+          }));
           
           // 🤖 Get AI suggestions and merge them
           if (contentToAnalyze.trim().length >= 20) {
             console.log('🤖 Getting AI enhancement...')
             const enhancedResult = await textAnalysisService.analyzeText(contentToAnalyze, writingGoal, false, analysisMode, wordLimit || undefined, true)
             
-            const mergedSuggestions = textAnalysisService.mergeSuggestions(instantResult.suggestions, enhancedResult.suggestions);
-            
-            console.log(`🤖 AI enhancement: ${enhancedResult.suggestions.length} AI suggestions, ${mergedSuggestions.length} total after merge`)
-            
             // Only update if AI actually added new suggestions (not just duplicates)
             const newAISuggestions = enhancedResult.suggestions.filter(aiSugg => 
               !instantResult.suggestions.some(instSugg => 
                 instSugg.originalText === aiSugg.originalText && 
-                instSugg.suggestedText === aiSugg.suggestedText
+                instSugg.suggestedText === aiSugg.suggestedText &&
+                instSugg.startIndex === aiSugg.startIndex &&
+                instSugg.endIndex === aiSugg.endIndex
               )
             );
             
             if (newAISuggestions.length > 0) {
-              const finalAnalysis = {
+              const mergedSuggestions = textAnalysisService.mergeSuggestions(instantResult.suggestions, enhancedResult.suggestions);
+              
+              // Update only the suggestions, keeping the rest of the analysis stable
+              setAnalysis(prevAnalysis => ({
                 ...enhancedResult,
-                suggestions: mergedSuggestions,
-              };
-              setAnalysis(finalAnalysis);
+                suggestions: mergedSuggestions
+              }));
+              
               console.log(`✅ Added ${newAISuggestions.length} new AI suggestions. Total: ${mergedSuggestions.length}`)
             } else {
               console.log(`⚡ No new AI suggestions found, keeping instant suggestions: ${instantResult.suggestions.length}`)
             }
-        } else {
+          } else {
             console.log(`✅ Analysis complete (instant only). Total suggestions: ${instantResult.suggestions.length}`)
           }
           
@@ -182,22 +175,28 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           // Fall back to instant analysis only if AI fails
           try {
             const fallbackResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
-            setAnalysis(fallbackResult)
+            setAnalysis(prevAnalysis => ({
+              ...fallbackResult,
+              suggestions: fallbackResult.suggestions
+            }))
             console.log('⚡ Fallback to instant-only analysis')
           } catch (fallbackError) {
             console.error('❌ Fallback analysis also failed:', fallbackError)
-        }
+          }
         } finally {
           setIsAutoAnalyzing(false)
           setAnalysisInProgress(false)
         }
-      }
-    }, 300) // Reduce debounce time back to 300ms for better responsiveness
+      }, 300) // Reduce debounce time back to 300ms for better responsiveness
 
-    setAnalysisTimeout(analyzeTimer)
+      setAnalysisTimeout(analyzeTimer)
+    }
+
     return () => {
-      clearTimeout(analyzeTimer)
-      setAnalysisTimeout(null)
+      if (analysisTimeout) {
+        clearTimeout(analysisTimeout)
+        setAnalysisTimeout(null)
+      }
     }
   }, [content])
 
@@ -641,10 +640,14 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'error': return 'border-red-200 bg-red-50 hover:bg-red-100'
-      case 'warning': return 'border-yellow-200 bg-yellow-50 hover:bg-yellow-100'
-      case 'suggestion': return 'border-blue-200 bg-blue-50 hover:bg-blue-100'
-      default: return 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+      case 'error':
+        return 'bg-red-50 border-red-200 hover:bg-red-100';
+      case 'warning':
+        return 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100';
+      case 'suggestion':
+        return 'bg-blue-50 border-blue-200 hover:bg-blue-100';
+      default:
+        return 'bg-gray-50 border-gray-200 hover:bg-gray-100';
     }
   }
 
@@ -948,8 +951,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                     </button>
                   )}
                 </div>
-                  </div>
-                )}
+              </div>
+            )}
 
             {!analysis?.suggestions.length ? (
               <div className="text-center py-8">
@@ -1049,8 +1052,6 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                     )}
                         </div>
                       ))}
-
-
               </div>
             )}
           </div>
@@ -1061,6 +1062,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       {showToneAnalysis && analysis?.toneAnalysis && (
         <ToneAnalysisPanel
           toneAnalysis={analysis.toneAnalysis}
+          isLoading={false}
           onClose={() => setShowToneAnalysis(false)}
         />
       )}
