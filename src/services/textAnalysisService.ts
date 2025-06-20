@@ -124,6 +124,9 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
     const lowerText = text.toLowerCase();
     const words = text.split(/(\s+|[^\w']+)/).filter(word => word.trim().length > 0);
     
+    // 🎯 CAPITALIZATION ERRORS
+    suggestions.push(...this.checkCapitalization(text));
+    
     // 🎯 CONTEXT-DEPENDENT HOMOPHONES
     suggestions.push(...this.checkContextualHomophones(text, lowerText));
     
@@ -136,8 +139,43 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
     // 🎯 ARTICLE USAGE (a/an)
     suggestions.push(...this.checkArticleUsage(text));
     
+    // 🎯 ADVERB VS ADJECTIVE ERRORS
+    suggestions.push(...this.checkAdverbAdjunctiveErrors(text));
+    
     // 🎯 PREPOSITION ERRORS
     suggestions.push(...this.checkPrepositionErrors(text));
+    
+    return suggestions;
+  }
+
+  /**
+   * Check capitalization errors (sentence beginnings, proper nouns)
+   */
+  private checkCapitalization(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Check for lowercase sentence beginnings
+    const sentencePattern = /(?:^|[.!?]\s+)([a-z])/g;
+    let match;
+    
+    while ((match = sentencePattern.exec(text)) !== null) {
+      const startIndex = match.index + (match[0].length - 1);
+      const lowercaseLetter = match[1];
+      const uppercaseLetter = lowercaseLetter.toUpperCase();
+      
+      suggestions.push({
+        id: `capitalization-${Date.now()}-${startIndex}`,
+        type: 'grammar',
+        severity: 'error',
+        message: 'Sentences should start with a capital letter',
+        originalText: lowercaseLetter,
+        suggestedText: uppercaseLetter,
+        startIndex,
+        endIndex: startIndex + 1,
+        explanation: 'The first word of a sentence should always be capitalized.',
+        confidence: 0.95
+      });
+    }
     
     return suggestions;
   }
@@ -189,7 +227,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
         word: 'your',
         patterns: [
           { 
-            context: /\byour\s+(welcome|right|wrong|correct|incorrect|awesome|amazing|great|wonderful|terrible|horrible|smart|intelligent|clever|funny|hilarious|beautiful|handsome|pretty|ugly|tall|short|fat|thin|old|young|happy|sad|angry|excited|nervous|scared|brave|confident|shy|outgoing|friendly|mean|nice|kind|generous|selfish|honest|dishonest|trustworthy|reliable|unreliable|responsible|irresponsible|mature|immature|serious|silly|funny|boring|interesting|creative|artistic|musical|athletic|strong|weak|healthy|sick|tired|energetic|lazy|hardworking|successful|unsuccessful|lucky|unlucky|popular|unpopular|famous|unknown|rich|poor|wealthy|broke|married|single|divorced|engaged|dating|available|taken|free|busy|occupied|employed|unemployed|retired|graduated|studying|working|playing|resting|sleeping|awake|alert|focused|distracted|confused|clear|certain|uncertain|sure|unsure|ready|unprepared|prepared|organized|disorganized|neat|messy|clean|dirty|new|old|fresh|stale|hot|cold|warm|cool|wet|dry|loud|quiet|fast|slow|early|late|on|off|in|out|up|down|here|there|everywhere|nowhere|somewhere|anywhere|always|never|sometimes|often|rarely|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|partly|completely|totally|entirely|fully|partially|slightly|barely|hardly|almost|nearly|quite|very|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously)\b/g,
+            context: /\byour\s+(welcome|right|wrong|correct|incorrect|awesome|amazing|great|wonderful|terrible|horrible|smart|intelligent|clever|funny|hilarious|beautiful|handsome|pretty|ugly|tall|short|fat|thin|old|young|happy|sad|angry|excited|nervous|scared|brave|confident|shy|outgoing|friendly|mean|nice|kind|generous|selfish|honest|dishonest|trustworthy|reliable|unreliable|responsible|irresponsible|mature|immature|serious|silly|funny|boring|interesting|creative|artistic|musical|athletic|strong|weak|healthy|sick|tired|energetic|lazy|hardworking|successful|unsuccessful|lucky|unlucky|popular|unpopular|famous|unknown|rich|poor|wealthy|broke|married|single|divorced|engaged|dating|available|taken|free|busy|occupied|employed|unemployed|retired|graduated|studying|working|playing|resting|sleeping|awake|alert|focused|distracted|confused|clear|certain|uncertain|sure|unsure|ready|unprepared|prepared|organized|disorganized|neat|messy|clean|dirty|new|old|fresh|stale|hot|cold|warm|cool|wet|dry|loud|quiet|fast|slow|early|late|on|off|in|out|up|down|here|there|everywhere|nowhere|somewhere|anywhere|always|never|sometimes|often|rarely|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|partly|completely|totally|entirely|fully|partially|slightly|barely|hardly|almost|nearly|quite|very|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably)\b/g,
             correct: false,
             replacement: "you're",
             explanation: '"You\'re" is the contraction for "you are"'
@@ -396,6 +434,39 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
 
   /**
    * Check common preposition errors
+   */
+  private checkAdverbAdjunctiveErrors(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Pattern for "verb + me/us/them + good" (should be "well")
+    const adverbPattern = /\b(prepared|served|treated|helped|taught|trained)\s+(me|us|him|her|them)\s+good\b/gi;
+    let match;
+    
+    while ((match = adverbPattern.exec(text)) !== null) {
+      const verb = match[1];
+      const pronoun = match[2];
+      const startIndex = match.index + match[0].indexOf('good');
+      const endIndex = startIndex + 4; // "good".length
+      
+      suggestions.push({
+        id: `adverb-${Date.now()}-${startIndex}`,
+        type: 'grammar',
+        severity: 'error',
+        message: 'Use "well" instead of "good" after action verbs',
+        originalText: 'good',
+        suggestedText: 'well',
+        startIndex,
+        endIndex,
+        explanation: `When describing how an action is performed, use the adverb "well" instead of the adjective "good". "${verb} ${pronoun} well" is correct.`,
+        confidence: 0.9
+      });
+    }
+    
+    return suggestions;
+  }
+
+  /**
+   * Check for common preposition errors
    */
   private checkPrepositionErrors(text: string): TextSuggestion[] {
     const suggestions: TextSuggestion[] = [];
@@ -643,7 +714,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
           } else {
             console.log(`🤖 Rejected invalid suggestion: ${suggestion.originalText} -> ${suggestion.suggestedText}`);
           }
-      } catch (error) {
+        } catch (error) {
           console.warn('AI validation failed for suggestion, including anyway:', error);
           suggestion.aiValidated = false;
           suggestion.confidence = Math.max(suggestion.confidence - 0.1, 0.1); // Lower confidence for unvalidated suggestions
@@ -824,7 +895,6 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       'writting': ['writing'],
       'writen': ['written'],
       'wrotes': ['wrote'],
-      'writed': ['wrote'],
       
       // Common misspellings from student writing
       'comunicate': ['communicate'],

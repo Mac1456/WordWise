@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Functionality Test</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-functions.js"></script>
+</head>
+<body>
+    <h1>WordWise AI Functionality Test</h1>
+    <textarea id="testText" rows="10" cols="50" placeholder="Enter your test text here...">
+i always wanted to writ a bookk. my book would be the very best book ever.
+
+Ever since I was young, I have always been intrested in helping other people. This is why I decided to volunteer at the local hospital. Their, I learned alot about how to comunicate with patients and there familys. I beleive this experiance has prepared me good for a career in healthcare. Due to the fact that I have worked hard throughout high school, I think that I deserve to be accepted into your prestegious program.
+    </textarea>
+    <br><br>
+    <button onclick="testAI()">Test AI Functionality</button>
+    <div id="results"></div>
+
+    <script>
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyBVtjjvZUHbxfD5qP-JOD-VKXDOR8kK5YQ",
+            authDomain: "wordwise-ai-4fadf.firebaseapp.com",
+            projectId: "wordwise-ai-4fadf",
+            storageBucket: "wordwise-ai-4fadf.firebasestorage.app",
+            messagingSenderId: "654857067094",
+            appId: "1:654857067094:web:45d0e8d7c7f5a8e8b5e8d7"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const functions = firebase.functions();
+
+        async function testAI() {
+            const text = document.getElementById('testText').value;
+            const resultsDiv = document.getElementById('results');
+            
+            resultsDiv.innerHTML = '<p>Testing AI functionality...</p>';
+            
+            try {
+                // Test AI Grammar Analysis
+                const analyzeGrammar = functions.httpsCallable('analyzeGrammarAndClarity');
+                const result = await analyzeGrammar({ text: text });
+                
+                resultsDiv.innerHTML = `
+                    <h2>✅ AI Functionality Working!</h2>
+                    <h3>Grammar Analysis Results:</h3>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+                
+                console.log('AI Analysis successful:', result.data);
+                
+            } catch (error) {
+                console.error('AI Analysis failed:', error);
+                resultsDiv.innerHTML = `
+                    <h2>❌ AI Functionality Failed</h2>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Details:</strong> ${error.code || 'Unknown error'}</p>
+                    <pre>${JSON.stringify(error, null, 2)}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 

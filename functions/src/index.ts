@@ -205,6 +205,10 @@ function deduplicateSuggestions(suggestions: any[]): any[] {
  * Secure Firebase Cloud Function that requires authentication
  */
 export const analyzeGrammarAndClarity = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     try {
       const text = validateRequest(request);
@@ -325,6 +329,10 @@ export const analyzeGrammarAndClarity = onCall(
  * Secure Firebase Cloud Function that requires authentication
  */
 export const analyzeTone = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     try {
       const text = validateRequest(request);
@@ -440,6 +448,10 @@ export const analyzeTone = onCall(
  * Requires authentication but doesn't use OpenAI credits
  */
 export const checkAIHealth = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError(
@@ -460,6 +472,10 @@ export const checkAIHealth = onCall(
  * Get user's usage statistics (optional - for rate limiting)
  */
 export const getUserUsage = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError(
@@ -488,6 +504,10 @@ export const getUserUsage = onCall(
  * Secure Firebase Cloud Function that requires authentication
  */
 export const analyzeConciseness = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     try {
       const text = validateRequest(request);
@@ -599,6 +619,10 @@ export const analyzeConciseness = onCall(
  * Secure Firebase Cloud Function that requires authentication
  */
 export const analyzeVocabulary = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     try {
       const text = validateRequest(request);
@@ -703,6 +727,10 @@ export const analyzeVocabulary = onCall(
  * Secure Firebase Cloud Function that requires authentication
  */
 export const analyzeGoalAlignment = onCall(
+  {
+    cors: true,
+    region: "us-central1"
+  },
   async (request) => {
     try {
       const text = validateRequest(request);
