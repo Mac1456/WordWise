@@ -145,6 +145,11 @@ export class FirebaseAIService {
     'analyzeGoalAlignment'
   );
 
+  private customPromptFunction = httpsCallable<{ prompt: string; text: string }, GrammarAnalysisResult>(
+    functions,
+    'analyzeWithCustomPrompt'
+  );
+
   /**
    * Check if user is authenticated
    */
@@ -320,16 +325,47 @@ export class FirebaseAIService {
   }
 
   /**
-   * Check if AI services are available
-   * @returns True if available
+   * Check if the AI service is available and working
+   * @returns Promise<boolean> - True if service is available
    */
   async isAvailable(): Promise<boolean> {
     try {
-      const health = await this.checkHealth();
-      return health.openaiConfigured;
+      await this.checkHealth();
+      return true;
     } catch (error) {
-      console.error('AI service availability check failed:', error);
+      console.warn('AI service health check failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Analyze text with a custom prompt for specialized analysis
+   * SECURE: API key never exposed to browser
+   * @param prompt - Custom analysis prompt
+   * @param text - Text to analyze
+   * @returns Analysis results
+   */
+  async analyzeWithCustomPrompt(prompt: string, text: string): Promise<GrammarAnalysisResult> {
+    this.ensureAuthenticated();
+    
+    if (!text || text.length < 10) {
+      throw new Error('Text must be at least 10 characters long');
+    }
+    
+    if (!prompt || prompt.length < 10) {
+      throw new Error('Prompt must be at least 10 characters long');
+    }
+    
+    if (text.length > 5000) {
+      throw new Error('Text too long. Maximum 5000 characters allowed');
+    }
+
+    try {
+      const result = await this.customPromptFunction({ prompt, text });
+      return result.data;
+    } catch (error: any) {
+      console.error('Custom prompt analysis failed:', error);
+      throw new Error(error.message || 'Failed to analyze text with custom prompt');
     }
   }
 }
