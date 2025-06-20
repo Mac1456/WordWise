@@ -313,7 +313,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
           } else {
             console.log(`🤖 Rejected invalid suggestion: ${suggestion.originalText} -> ${suggestion.suggestedText}`);
           }
-        } catch (error) {
+      } catch (error) {
           console.warn('AI validation failed for suggestion, including anyway:', error);
           suggestion.aiValidated = false;
           suggestion.confidence = Math.max(suggestion.confidence - 0.1, 0.1); // Lower confidence for unvalidated suggestions
@@ -379,7 +379,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
 
   private async checkGrammar(text: string): Promise<TextSuggestion[]> {
     const suggestions: TextSuggestion[] = [];
-    
+
     // Use compromise.js for basic grammar analysis
     const doc = nlp(text);
     const sentences = doc.sentences().out('array');
@@ -388,7 +388,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       const sentence = sentences[i];
       const sentenceDoc = nlp(sentence);
       const startIndex = text.indexOf(sentence);
-      
+
       // Check for sentence fragments (no verb)
       const hasVerb = sentenceDoc.verbs().length > 0;
       if (!hasVerb && sentence.trim().length > 3) {
@@ -726,10 +726,10 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
         if (commonMisspellings[twoWordPhrase]) {
           const phraseStart = text.indexOf(originalTwoWords, currentIndex);
           if (phraseStart !== -1) {
-            suggestions.push({
+        suggestions.push({
               id: `spell-compound-${Date.now()}-${i}`,
-              type: 'spelling',
-              severity: 'error',
+          type: 'spelling',
+          severity: 'error',
               message: `"${originalTwoWords}" appears to be a compound error`,
               originalText: originalTwoWords,
               suggestedText: commonMisspellings[twoWordPhrase][0],

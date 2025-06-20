@@ -66,18 +66,7 @@ export default function EditorPage() {
       
       {/* Editor Container - Takes remaining height */}
       <div className="flex-1 min-h-0">
-        <WritingEditor 
-          initialText={currentDocument?.content || ''}
-          onTextChange={(text) => {
-            // Handle text changes
-            console.log('Text changed:', text.length, 'characters')
-          }}
-          onSave={(text) => {
-            // Handle save
-            console.log('Saving document:', text.length, 'characters')
-          }}
-          className="h-full"
-        />
+        <WritingEditor documentId={documentId} />
       </div>
     </div>
   )
