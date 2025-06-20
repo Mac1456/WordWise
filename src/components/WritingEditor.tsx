@@ -15,7 +15,11 @@ import {
   Target,
   Type,
   Download,
-  Trash2 
+  Trash2,
+  CheckCheck,
+  Zap,
+  BookOpen,
+  Scissors
 } from 'lucide-react'
 
 interface WritingEditorProps {
@@ -90,6 +94,35 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
     return () => clearTimeout(analyzeTimer)
   }, [content])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+Shift+A: Apply all suggestions
+      if (event.ctrlKey && event.shiftKey && event.key === 'A') {
+        event.preventDefault()
+        if (analysis?.suggestions.length && analysis.suggestions.length > 0) {
+          if (confirm(`Apply all ${analysis.suggestions.length} suggestions? (Ctrl+Shift+A)`)) {
+            applyAllSuggestions()
+          }
+        }
+      }
+      
+      // Ctrl+Shift+E: Apply all error corrections
+      if (event.ctrlKey && event.shiftKey && event.key === 'E') {
+        event.preventDefault()
+        const errorSuggestions = analysis?.suggestions.filter(s => s.severity === 'error') || []
+        if (errorSuggestions.length > 0) {
+          if (confirm(`Apply all ${errorSuggestions.length} error corrections? (Ctrl+Shift+E)`)) {
+            applyAllSuggestions(errorSuggestions)
+          }
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [analysis])
 
   const handleContentChange = (newContent: string) => {
     setContent(newContent)
@@ -262,6 +295,103 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     }
     setSelectedSuggestion(null)
   }
+
+  const applyAllSuggestions = async (suggestionsToApply?: TextSuggestion[]) => {
+    if (!analysis || !analysis.suggestions.length) return
+
+    const suggestions = suggestionsToApply || analysis.suggestions
+    if (suggestions.length === 0) return
+
+    // Sort suggestions by start index in descending order (end to start)
+    // This prevents index conflicts when applying multiple changes
+    const sortedSuggestions = [...suggestions].sort((a, b) => b.startIndex - a.startIndex)
+    
+    let newContent = content
+    let appliedCount = 0
+
+    console.log(`Applying ${sortedSuggestions.length} suggestions in bulk...`)
+
+    // Apply all suggestions to the text
+    for (const suggestion of sortedSuggestions) {
+      // Verify the suggestion is still valid (text hasn't changed)
+      const originalText = newContent.substring(suggestion.startIndex, suggestion.endIndex)
+      if (originalText === suggestion.originalText) {
+        newContent = 
+          newContent.substring(0, suggestion.startIndex) + 
+          suggestion.suggestedText + 
+          newContent.substring(suggestion.endIndex)
+        
+        appliedCount++
+        console.log(`Applied: "${suggestion.originalText}" → "${suggestion.suggestedText}"`)
+      } else {
+        console.warn(`Skipping suggestion "${suggestion.originalText}" - text has changed`)
+      }
+    }
+
+    if (appliedCount === 0) {
+      alert('No suggestions could be applied. The text may have changed.')
+      return
+    }
+
+    // Update content and clear selected suggestion
+    setContent(newContent)
+    setSelectedSuggestion(null)
+
+    // Clear existing timeout
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout)
+    }
+
+    // Set new timeout for auto-save
+    const timeout = setTimeout(() => {
+      autoSave(newContent)
+    }, 2000)
+    setAutoSaveTimeout(timeout)
+
+    // Immediately re-analyze to get fresh suggestions
+    setTimeout(async () => {
+      if (newContent.trim().length > 10) {
+        setIsAnalyzing(true)
+        try {
+          const result = await textAnalysisService.analyzeText(newContent, writingGoal, false, analysisMode, wordLimit || undefined)
+          setAnalysis(result)
+          console.log(`Bulk application completed: ${appliedCount} suggestions applied`)
+        } catch (error) {
+          console.error('Re-analysis after bulk application failed:', error)
+        } finally {
+          setIsAnalyzing(false)
+        }
+      }
+    }, 100)
+
+    // Show success message
+    alert(`Successfully applied ${appliedCount} suggestion${appliedCount === 1 ? '' : 's'}!`)
+  }
+
+  const applyAllByType = (type: string) => {
+    if (!analysis) return
+    const suggestionsOfType = analysis.suggestions.filter(s => s.type === type)
+    if (suggestionsOfType.length === 0) return
+    
+    const confirmMessage = `Apply all ${suggestionsOfType.length} ${type} suggestion${suggestionsOfType.length === 1 ? '' : 's'}?`
+    if (confirm(confirmMessage)) {
+      applyAllSuggestions(suggestionsOfType)
+    }
+  }
+
+  const applyAllErrors = () => {
+    if (!analysis) return
+    const errorSuggestions = analysis.suggestions.filter(s => s.severity === 'error')
+    if (errorSuggestions.length === 0) return
+    
+    const confirmMessage = `Apply all ${errorSuggestions.length} error correction${errorSuggestions.length === 1 ? '' : 's'}?`
+    if (confirm(confirmMessage)) {
+      applyAllSuggestions(errorSuggestions)
+    }
+  }
+
+  const applyAllSpelling = () => applyAllByType('spelling')
+  const applyAllGrammar = () => applyAllByType('grammar')
 
   const handleToneAnalysis = async () => {
     if (!content.trim() || content.trim().length < 50) {
@@ -631,6 +761,80 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
               ) : null}
             </div>
             
+            {/* Bulk Action Buttons */}
+            {analysis?.suggestions.length && analysis.suggestions.length > 1 && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-medium text-gray-700">Quick Actions</div>
+                  <div className="text-xs text-gray-500" title="Keyboard shortcuts: Ctrl+Shift+A (Apply All), Ctrl+Shift+E (Fix Errors)">
+                    ⌨️ Shortcuts
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      if (analysis && confirm(`Apply all ${analysis.suggestions.length} suggestions?`)) {
+                        applyAllSuggestions()
+                      }
+                    }}
+                    className="px-3 py-2 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors flex items-center justify-center space-x-1"
+                  >
+                    <CheckCheck className="h-3 w-3" />
+                    <span>Apply All ({analysis?.suggestions.length || 0})</span>
+                  </button>
+                  {errorCount > 0 && (
+                    <button
+                      onClick={applyAllErrors}
+                      className="px-3 py-2 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors flex items-center justify-center space-x-1"
+                    >
+                      <Zap className="h-3 w-3" />
+                      <span>Fix Errors ({errorCount})</span>
+                    </button>
+                  )}
+                </div>
+                
+                {/* Type-specific buttons */}
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {suggestionsByType.spelling?.length > 0 && (
+                    <button
+                      onClick={applyAllSpelling}
+                      className="px-3 py-2 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors flex items-center justify-center space-x-1"
+                    >
+                      <Type className="h-3 w-3" />
+                      <span>Spelling ({suggestionsByType.spelling.length})</span>
+                    </button>
+                  )}
+                  {suggestionsByType.grammar?.length > 0 && (
+                    <button
+                      onClick={applyAllGrammar}
+                      className="px-3 py-2 text-xs font-medium text-white bg-purple-600 rounded hover:bg-purple-700 transition-colors flex items-center justify-center space-x-1"
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      <span>Grammar ({suggestionsByType.grammar.length})</span>
+                    </button>
+                  )}
+                  {suggestionsByType.vocabulary?.length > 0 && (
+                    <button
+                      onClick={() => applyAllByType('vocabulary')}
+                      className="px-3 py-2 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors flex items-center justify-center space-x-1"
+                    >
+                      <Lightbulb className="h-3 w-3" />
+                      <span>Vocabulary ({suggestionsByType.vocabulary.length})</span>
+                    </button>
+                  )}
+                  {suggestionsByType.conciseness?.length > 0 && (
+                    <button
+                      onClick={() => applyAllByType('conciseness')}
+                      className="px-3 py-2 text-xs font-medium text-white bg-teal-600 rounded hover:bg-teal-700 transition-colors flex items-center justify-center space-x-1"
+                    >
+                      <Scissors className="h-3 w-3" />
+                      <span>Concise ({suggestionsByType.conciseness.length})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            
             {!analysis?.suggestions.length ? (
               <div className="text-center py-8">
                 <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
@@ -706,17 +910,15 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                           </div>
                         )}
                         <div className="flex space-x-2">
-                          {suggestion.originalText !== suggestion.suggestedText && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                applySuggestion(suggestion)
-                              }}
-                              className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700"
-                            >
-                              Apply
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              applySuggestion(suggestion)
+                            }}
+                            className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700"
+                          >
+                            Apply
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
