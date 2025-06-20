@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { TextSuggestion } from '../services/textAnalysisService';
 
 interface HighlightedTextAreaProps {
@@ -30,8 +30,9 @@ export default function HighlightedTextArea({
     }
   };
 
-  // Generate highlighted HTML with suggestions
-  const getHighlightedContent = () => {
+  // Memoize highlighted content for better performance
+  const highlightedContent = useMemo(() => {
+    // Early return for no suggestions - improves performance
     if (!suggestions.length) {
       return value.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
     }
@@ -90,7 +91,7 @@ export default function HighlightedTextArea({
     result += remainingText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
     
     return result;
-  };
+  }, [value, suggestions]); // Only recalculate when value or suggestions change
 
   // Handle clicks on highlighted suggestions
   useEffect(() => {
@@ -134,7 +135,7 @@ export default function HighlightedTextArea({
       >
         <div 
           className="pointer-events-auto"
-          dangerouslySetInnerHTML={{ __html: getHighlightedContent() }}
+          dangerouslySetInnerHTML={{ __html: highlightedContent }}
         />
       </div>
 

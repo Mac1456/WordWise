@@ -181,7 +181,7 @@ class TextAnalysisService {
     } catch (error) {
       console.warn('OpenAI analysis failed, falling back to rule-based analysis:', error);
       
-      // Fallback to rule-based analysis
+      // Fallback to rule-based analysis only if AI failed
       const grammarSuggestions = await this.checkGrammar(text);
       suggestions.push(...grammarSuggestions);
 
@@ -192,21 +192,26 @@ class TextAnalysisService {
       suggestions.push(...styleSuggestions);
     }
 
-    // Always include vocabulary suggestions (can be enhanced later)
-    const vocabularySuggestions = await this.checkVocabulary();
-    suggestions.push(...vocabularySuggestions);
+    // Remove redundant rule-based suggestions since AI analysis is comprehensive
+    // Only add rule-based if AI analysis produced very few suggestions
+    if (suggestions.length < 2) {
+      const vocabularySuggestions = await this.checkVocabulary();
+      suggestions.push(...vocabularySuggestions);
 
-    // Goal-aligned suggestions
-    if (writingGoal) {
-      const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
-      suggestions.push(...goalSuggestions);
+      if (writingGoal) {
+        const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
+        suggestions.push(...goalSuggestions);
+      }
     }
 
-    // Resolve conflicts between overlapping suggestions
-    const resolvedSuggestions = this.resolveConflictingSuggestions(suggestions);
+    // Early deduplication before conflict resolution for better performance
+    const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
     
-    if (resolvedSuggestions.length !== suggestions.length) {
-      console.log(`Conflict resolution: ${suggestions.length} → ${resolvedSuggestions.length} suggestions`);
+    // Resolve conflicts between overlapping suggestions
+    const resolvedSuggestions = this.resolveConflictingSuggestions(deduplicatedSuggestions);
+    
+    if (resolvedSuggestions.length !== deduplicatedSuggestions.length) {
+      console.log(`Conflict resolution: ${deduplicatedSuggestions.length} → ${resolvedSuggestions.length} suggestions`);
     }
 
     // Readability analysis
