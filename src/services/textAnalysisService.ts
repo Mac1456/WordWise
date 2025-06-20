@@ -5,7 +5,7 @@ import { firebaseAIService } from './firebaseAIService';
 
 export interface TextSuggestion {
   id: string;
-  type: 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment' | 'conciseness';
+  type: 'grammar' | 'spelling' | 'punctuation' | 'clarity' | 'style' | 'vocabulary' | 'goal-alignment' | 'conciseness';
   severity: 'error' | 'warning' | 'suggestion';
   message: string;
   originalText: string;
@@ -13,8 +13,10 @@ export interface TextSuggestion {
   startIndex: number;
   endIndex: number;
   explanation: string;
+  confidence: number;
   alternatives?: string[]; // For vocabulary suggestions
   wordsSaved?: number; // For conciseness suggestions
+  aiValidated?: boolean; // NEW: Indicates if suggestion was validated by AI
 }
 
 export interface ToneAnalysis {
@@ -38,8 +40,8 @@ export interface TextAnalysis {
 }
 
 class TextAnalysisService {
-  private spellChecker: Typo | null = null;
   private isInitialized = false;
+  private suggestionCache = new Map<string, boolean>(); // Cache for AI validation results
 
   async initialize() {
     if (this.isInitialized) return;
@@ -49,15 +51,65 @@ class TextAnalysisService {
       // Skip initialization in browser environment where it's not needed
       if (typeof window !== 'undefined') {
         console.log('Skipping Typo.js initialization in browser (using AI instead)');
-        this.spellChecker = null;
-      } else {
-      this.spellChecker = new Typo('en_US');
       }
       this.isInitialized = true;
     } catch (error) {
       console.warn('Spell checker initialization failed, using AI fallback:', error);
-      this.spellChecker = null;
     }
+  }
+
+  /**
+   * 🤖 AI VALIDATION: Check if a suggestion is actually correct
+   * This prevents false positives and improves suggestion quality
+   */
+  private async validateSuggestionWithAI(suggestion: TextSuggestion, fullText: string): Promise<boolean> {
+    // Create a cache key for this suggestion
+    const cacheKey = `${suggestion.originalText}->${suggestion.suggestedText}:${suggestion.type}`;
+    
+    // Check cache first
+    if (this.suggestionCache.has(cacheKey)) {
+      return this.suggestionCache.get(cacheKey)!;
+    }
+
+    try {
+      // Use AI to validate the suggestion
+      const validationPrompt = `Please validate this writing suggestion:
+
+Original text: "${suggestion.originalText}"
+Suggested text: "${suggestion.suggestedText}"
+Suggestion type: ${suggestion.type}
+Context: "${this.getContextAroundSuggestion(fullText, suggestion)}"
+
+Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed by a brief reason.`;
+
+      const result = await firebaseAIService.analyzeWithCustomPrompt(validationPrompt, fullText);
+      
+      // Parse the AI response
+      const aiResponse = result.suggestions[0]?.explanation || '';
+      const isValid = aiResponse.toLowerCase().startsWith('yes');
+      
+      // Cache the result
+      this.suggestionCache.set(cacheKey, isValid);
+      
+      console.log(`🤖 AI Validation: ${suggestion.originalText} -> ${suggestion.suggestedText}: ${isValid ? 'VALID' : 'INVALID'}`);
+      
+      return isValid;
+    } catch (error) {
+      console.warn('AI validation failed, defaulting to accept suggestion:', error);
+      // If AI validation fails, we'll be conservative and accept the suggestion
+      // but mark it with lower confidence
+      return true;
+    }
+  }
+
+  /**
+   * Get context around a suggestion for better AI validation
+   */
+  private getContextAroundSuggestion(fullText: string, suggestion: TextSuggestion): string {
+    const contextRadius = 50; // characters before and after
+    const start = Math.max(0, suggestion.startIndex - contextRadius);
+    const end = Math.min(fullText.length, suggestion.endIndex + contextRadius);
+    return fullText.substring(start, end);
   }
 
   /**
@@ -131,17 +183,9 @@ class TextAnalysisService {
   }
 
   /**
-   * 🚀 HYBRID APPROACH: Instant Local Checks + AI Enhancement
-   * 
-   * Phase 1: INSTANT LOCAL ANALYSIS (0ms delay)
-   * - Basic spelling & grammar checks using compromise.js
-   * - Immediate feedback for common errors
-   * 
-   * Phase 2: AI ENHANCEMENT (background, 2-5s delay)
-   * - Advanced analysis with educational explanations
-   * - Contextual suggestions and improvements
+   * 🚀 COMPREHENSIVE ANALYSIS: Local checks + AI enhancement + AI validation
    */
-  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean, analysisMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment', wordLimit?: number, skipInstantAnalysis?: boolean): Promise<TextAnalysis> {
+  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean, analysisMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment', skipInstantAnalysis?: boolean): Promise<TextAnalysis> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -185,370 +229,166 @@ class TextAnalysisService {
       try {
         console.log('🚀 Starting enhanced comprehensive AI analyses...');
         
-        // Create array of promises for parallel execution
-        const analysisPromises: Promise<any>[] = [];
-        
-        // Layer 1: Enhanced Grammar & Spelling AI - minimum 15 characters (lowered threshold)
+        // AI Grammar & Clarity Analysis
         if (text.trim().length >= 15) {
-          analysisPromises.push(
-            firebaseAIService.analyzeGrammarAndClarity(text).then(result => ({ type: 'grammar', result })).catch(error => ({ type: 'grammar', error }))
-          );
-        }
-        
-        // Layer 2: Conciseness Analysis - minimum 20 characters (lowered from 30)
-        if (text.trim().length >= 20) {
-          analysisPromises.push(
-            firebaseAIService.analyzeConciseness(text).then(result => ({ type: 'conciseness', result })).catch(error => ({ type: 'conciseness', error }))
-          );
-        }
-        
-        // Layer 3: Vocabulary Enhancement - minimum 30 characters (lowered from 50)
-        if (text.trim().length >= 30) {
-          analysisPromises.push(
-            firebaseAIService.analyzeVocabulary(text).then(result => ({ type: 'vocabulary', result })).catch(error => ({ type: 'vocabulary', error }))
-          );
-        }
-        
-        // Layer 4: Goal-Based Personalization - minimum 50 characters (lowered from 100)
-        if (writingGoal && text.trim().length >= 50) {
-          analysisPromises.push(
-            firebaseAIService.analyzeGoalAlignment(text, writingGoal).then(result => ({ type: 'goal-alignment', result })).catch(error => ({ type: 'goal-alignment', error }))
-          );
-        }
-        
-        // Wait for all analyses to complete in parallel
-        const analysisResults = await Promise.all(analysisPromises);
-        console.log(`✅ Enhanced comprehensive analyses complete: ${analysisResults.length} analyses finished`);
-        
-        // Process results with enhanced filtering and quality control
-        for (const analysis of analysisResults) {
-          if (analysis.error) {
-            console.warn(`${analysis.type} analysis failed:`, analysis.error);
-            continue;
-          }
-          
-          if (analysis.type === 'grammar') {
-            // Enhanced grammar processing with better filtering
-            const newAISuggestions = analysis.result.suggestions.filter((aiSuggestion: any) => {
-              // More thorough overlap detection
-              return !suggestions.some(localSuggestion => {
-                // Check for exact text match
-                if (localSuggestion.originalText.toLowerCase().trim() === aiSuggestion.originalText.toLowerCase().trim()) {
-                  return true;
-                }
-                
-                // Check for positional overlap with tolerance
-                if (this.suggestionsOverlap({
-                  startIndex: aiSuggestion.startIndex,
-                  endIndex: aiSuggestion.endIndex,
-                  originalText: aiSuggestion.originalText,
-                  suggestedText: aiSuggestion.suggestedText
-                } as any, localSuggestion)) {
-                  return true;
-                }
-                
-                // Check if same suggestion text with position tolerance
-                if (localSuggestion.suggestedText.toLowerCase().trim() === aiSuggestion.suggestedText.toLowerCase().trim() &&
-                    Math.abs(localSuggestion.startIndex - aiSuggestion.startIndex) < 15) {
-                  return true;
-                }
-                
-                return false;
-              });
-            });
-            
-            // Add AI grammar suggestions with enhanced metadata
-            const aiSuggestions = newAISuggestions.map((suggestion: any) => ({
-              id: `ai-grammar-enhanced-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
-              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-              message: suggestion.message,
-              originalText: suggestion.originalText,
-              suggestedText: suggestion.suggestedText,
-              startIndex: suggestion.startIndex,
-              endIndex: suggestion.endIndex,
-              explanation: suggestion.explanation + ' (AI Enhanced)',
-              alternatives: undefined
-            }));
-            
+          try {
+            const grammarResult = await firebaseAIService.analyzeGrammarAndClarity(text);
+            const aiSuggestions = grammarResult.suggestions.map(s => this.convertToTextSuggestion(s));
             suggestions.push(...aiSuggestions);
-            console.log(`🤖 Added ${aiSuggestions.length} enhanced AI grammar suggestions (${analysis.result.suggestions.length - newAISuggestions.length} duplicates filtered)`);
+            console.log(`🚀 AI Grammar analysis: ${aiSuggestions.length} suggestions added`);
+          } catch (error) {
+            console.warn('AI Grammar analysis failed:', error);
           }
-          
-          else if (analysis.type === 'conciseness') {
-            // Enhanced conciseness processing
-            const concisenessSuggestions = analysis.result.suggestions
-              .filter((suggestion: any) => {
-                // Only include conciseness suggestions that actually save significant words
-                return suggestion.wordsSaved && suggestion.wordsSaved >= 1;
-              })
-              .map((suggestion: any) => ({
-                id: `ai-conciseness-enhanced-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                type: 'conciseness' as const,
-                severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-                message: `${suggestion.message} (saves ${suggestion.wordsSaved} word${suggestion.wordsSaved > 1 ? 's' : ''})`,
-                originalText: suggestion.originalText,
-                suggestedText: suggestion.suggestedText,
-                startIndex: suggestion.startIndex,
-                endIndex: suggestion.endIndex,
-                explanation: suggestion.explanation + ` This revision saves ${suggestion.wordsSaved} word${suggestion.wordsSaved > 1 ? 's' : ''} while maintaining clarity.`,
-                wordsSaved: suggestion.wordsSaved
-              }));
+        }
+        
+        // AI Conciseness Analysis
+        if (text.trim().length >= 20) {
+          try {
+            const concisenessResult = await firebaseAIService.analyzeConciseness(text);
+            const concisenessSuggestions = concisenessResult.suggestions.map(s => this.convertToTextSuggestion(s));
             suggestions.push(...concisenessSuggestions);
-            console.log(`🤖 Added ${concisenessSuggestions.length} enhanced conciseness suggestions`);
+            console.log(`🚀 AI Conciseness analysis: ${concisenessSuggestions.length} suggestions added`);
+          } catch (error) {
+            console.warn('AI Conciseness analysis failed:', error);
           }
-          
-          else if (analysis.type === 'vocabulary') {
-            // Enhanced vocabulary processing with better filtering
-            const vocabularySuggestions = analysis.result.suggestions
-              .filter((suggestion: any) => {
-                // Enhanced filtering for overly formal suggestions
-                const originalText = suggestion.originalText.toLowerCase();
-                const suggestedText = suggestion.suggestedText.toLowerCase();
-                
-                // Expanded list of overly formal replacements to filter
-                const overlyFormalReplacements = {
-                  'want': ['aspire', 'desire', 'yearn', 'endeavor', 'covet'],
-                  'write': ['author', 'compose', 'craft', 'pen', 'scribe'],
-                  'book': ['manuscript', 'tome', 'publication', 'literary work', 'opus'],
-                  'best': ['optimal', 'superior', 'exemplary', 'unparalleled', 'superlative'],
-                  'good': ['exemplary', 'superior', 'exceptional', 'outstanding', 'sublime'],
-                  'get': ['obtain', 'acquire', 'procure', 'secure', 'attain'],
-                  'use': ['utilize', 'employ', 'implement', 'leverage', 'harness'],
-                  'help': ['facilitate', 'assist', 'accommodate', 'support', 'ameliorate'],
-                  'show': ['demonstrate', 'illustrate', 'exhibit', 'manifest', 'elucidate'],
-                  'make': ['fabricate', 'construct', 'manufacture', 'forge', 'synthesize'],
-                  'think': ['contemplate', 'ruminate', 'ponder', 'deliberate', 'cogitate']
-                };
-                
-                // Check if this is an overly formal replacement
-                for (const [casual, formals] of Object.entries(overlyFormalReplacements)) {
-                  if (originalText.includes(casual) && formals.some(formal => suggestedText.includes(formal))) {
-                    console.log(`🚫 Filtering overly formal vocabulary suggestion: "${suggestion.originalText}" → "${suggestion.suggestedText}"`);
-                    return false;
-                  }
-                }
-                
-                // Keep suggestions that improve clarity without being overly formal
-                return true;
-              })
-              .map((suggestion: any) => ({
-                id: `ai-vocabulary-enhanced-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                type: 'vocabulary' as const,
-                severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-                message: suggestion.message,
-                originalText: suggestion.originalText,
-                suggestedText: suggestion.suggestedText,
-                startIndex: suggestion.startIndex,
-                endIndex: suggestion.endIndex,
-                explanation: suggestion.explanation + ' (Enhanced for natural tone)',
-                alternatives: suggestion.alternatives
-              }));
-            suggestions.push(...vocabularySuggestions);
-            console.log(`🤖 Added ${vocabularySuggestions.length} enhanced vocabulary suggestions`);
+        }
+        
+        // AI Vocabulary Analysis
+        if (text.trim().length >= 25) {
+          try {
+            const vocabularyResult = await firebaseAIService.analyzeVocabulary(text);
+            const vocabularySuggestions = vocabularyResult.suggestions.map(s => this.convertToTextSuggestion(s));
+            // Filter out overly formal suggestions
+            const filteredVocabSuggestions = vocabularySuggestions.filter(s => 
+              this.isAppropriateVocabularySuggestion(s, text)
+            );
+            suggestions.push(...filteredVocabSuggestions);
+            console.log(`🚀 AI Vocabulary analysis: ${filteredVocabSuggestions.length} suggestions added (${vocabularySuggestions.length - filteredVocabSuggestions.length} filtered out)`);
+          } catch (error) {
+            console.warn('AI Vocabulary analysis failed:', error);
           }
-          
-          else if (analysis.type === 'goal-alignment') {
-            // Enhanced goal alignment processing
-            const goalSuggestions = analysis.result.suggestions.map((suggestion: any) => ({
-              id: `ai-goal-enhanced-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: 'goal-alignment' as const,
-              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-              message: `${suggestion.message} (Goal: ${writingGoal})`,
-              originalText: suggestion.originalText,
-              suggestedText: suggestion.suggestedText,
-              startIndex: suggestion.startIndex,
-              endIndex: suggestion.endIndex,
-              explanation: suggestion.explanation + ` This aligns better with your ${writingGoal} goals.`
-            }));
+        }
+        
+        // AI Goal Alignment Analysis
+        if (writingGoal && text.trim().length >= 50) {
+          try {
+            const goalResult = await firebaseAIService.analyzeGoalAlignment(text, writingGoal);
+            const goalSuggestions = goalResult.suggestions.map(s => this.convertToTextSuggestion(s));
             suggestions.push(...goalSuggestions);
-            console.log(`🤖 Added ${goalSuggestions.length} enhanced goal-alignment suggestions`);
+            console.log(`🚀 AI Goal alignment analysis: ${goalSuggestions.length} suggestions added`);
+          } catch (error) {
+            console.warn('AI Goal alignment analysis failed:', error);
           }
         }
         
       } catch (error) {
-        console.warn('Enhanced comprehensive AI analysis failed:', error);
-      }
-    }
-    
-    // 🎯 INDIVIDUAL AI ENHANCEMENT (for non-comprehensive modes)
-    else if (text.trim().length >= 20) {
-      try {
-        console.log(`🤖 Enhancing with AI analysis (mode: ${mode})...`);
-        
-        // Individual mode processing
-        if (mode === 'conciseness' && text.trim().length >= 30) {
-          const concisenessAnalysis = await firebaseAIService.analyzeConciseness(text);
-          const concisenessSuggestions = concisenessAnalysis.suggestions.map((suggestion: any) => ({
-            id: `ai-conciseness-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'conciseness' as const,
-            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-            message: suggestion.message,
-            originalText: suggestion.originalText,
-            suggestedText: suggestion.suggestedText,
-            startIndex: suggestion.startIndex,
-            endIndex: suggestion.endIndex,
-            explanation: suggestion.explanation,
-            wordsSaved: suggestion.wordsSaved
-          }));
-          suggestions.push(...concisenessSuggestions);
-          console.log(`🤖 Added ${concisenessSuggestions.length} conciseness suggestions`);
-        }
-        
-        else if (mode === 'vocabulary' && text.trim().length >= 50) {
-          const vocabularyAnalysis = await firebaseAIService.analyzeVocabulary(text);
-          const vocabularySuggestions = vocabularyAnalysis.suggestions
-            .filter((suggestion: any) => {
-              // Filter out overly formal suggestions that don't match the original tone
-              const originalText = suggestion.originalText.toLowerCase();
-              const suggestedText = suggestion.suggestedText.toLowerCase();
-              
-              // Skip overly formal replacements for casual words
-              const overlyFormalReplacements = {
-                'want': ['aspire', 'desire', 'yearn', 'endeavor'],
-                'write': ['author', 'compose', 'craft', 'pen'],
-                'book': ['manuscript', 'tome', 'publication', 'literary work'],
-                'best': ['optimal', 'superior', 'exemplary', 'unparalleled'],
-                'good': ['exemplary', 'superior', 'exceptional', 'outstanding'],
-                'get': ['obtain', 'acquire', 'procure', 'secure'],
-                'use': ['utilize', 'employ', 'implement', 'leverage'],
-                'help': ['facilitate', 'assist', 'accommodate', 'support'],
-                'show': ['demonstrate', 'illustrate', 'exhibit', 'manifest']
-              };
-              
-              // Check if this is an overly formal replacement
-              for (const [casual, formals] of Object.entries(overlyFormalReplacements)) {
-                if (originalText.includes(casual) && formals.some(formal => suggestedText.includes(formal))) {
-                  console.log(`🚫 Filtering overly formal suggestion: "${suggestion.originalText}" → "${suggestion.suggestedText}"`);
-                  return false;
-                }
-              }
-              
-              // Keep suggestions that improve clarity without being overly formal
-              return true;
-            })
-            .map((suggestion: any) => ({
-            id: `ai-vocabulary-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'vocabulary' as const,
-            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-            message: suggestion.message,
-            originalText: suggestion.originalText,
-            suggestedText: suggestion.suggestedText,
-            startIndex: suggestion.startIndex,
-            endIndex: suggestion.endIndex,
-            explanation: suggestion.explanation,
-            alternatives: suggestion.alternatives
-          }));
-          suggestions.push(...vocabularySuggestions);
-          console.log(`🤖 Added ${vocabularySuggestions.length} vocabulary suggestions`);
-        }
-        
-        else if (mode === 'goal-alignment' && writingGoal && text.trim().length >= 100) {
-          const goalAnalysis = await firebaseAIService.analyzeGoalAlignment(text, writingGoal);
-          const goalSuggestions = goalAnalysis.suggestions.map((suggestion: any) => ({
-            id: `ai-goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'goal-alignment' as const,
-            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-            message: suggestion.message,
-            originalText: suggestion.originalText,
-            suggestedText: suggestion.suggestedText,
-            startIndex: suggestion.startIndex,
-            endIndex: suggestion.endIndex,
-            explanation: suggestion.explanation
-          }));
-          suggestions.push(...goalSuggestions);
-          console.log(`🤖 Added ${goalSuggestions.length} goal-alignment suggestions`);
-        }
-        
-        else if (mode === 'grammar-only') {
-          const aiAnalysis = await firebaseAIService.analyzeGrammarAndClarity(text);
-          const aiSuggestions = aiAnalysis.suggestions.map((suggestion: any) => ({
-            id: `ai-grammar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
-            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-            message: suggestion.message,
-            originalText: suggestion.originalText,
-            suggestedText: suggestion.suggestedText,
-            startIndex: suggestion.startIndex,
-            endIndex: suggestion.endIndex,
-            explanation: suggestion.explanation,
-            alternatives: undefined
-          }));
-          suggestions.push(...aiSuggestions);
-          console.log(`🤖 Added ${aiSuggestions.length} AI grammar suggestions`);
-        }
-        
-      } catch (error) {
-        console.warn('Individual AI enhancement failed:', error);
+        console.warn('Comprehensive AI analysis failed:', error);
       }
     }
 
-    // Add remaining local checks for comprehensive mode only
-    if (mode === 'comprehensive') {
-      const vocabularySuggestions = await this.checkVocabulary();
-      suggestions.push(...vocabularySuggestions);
-
-      if (writingGoal) {
-        const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
-        suggestions.push(...goalSuggestions);
+    // 🚀 PHASE 2: AI VALIDATION OF SUGGESTIONS
+    console.log('🤖 Starting AI validation of suggestions...');
+    const validatedSuggestions: TextSuggestion[] = [];
+    
+    // Validate suggestions in batches to avoid overwhelming the AI
+    const batchSize = 5;
+    for (let i = 0; i < suggestions.length; i += batchSize) {
+      const batch = suggestions.slice(i, i + batchSize);
+      
+      // Validate each suggestion in the batch
+      for (const suggestion of batch) {
+        // Skip AI validation for high-confidence suggestions or if text is too short
+        if (suggestion.confidence >= 0.9 || text.length < 20) {
+          suggestion.aiValidated = false; // Mark as not AI validated
+          validatedSuggestions.push(suggestion);
+          continue;
+        }
+        
+        try {
+          const isValid = await this.validateSuggestionWithAI(suggestion, text);
+          if (isValid) {
+            suggestion.aiValidated = true;
+            suggestion.confidence = Math.min(suggestion.confidence + 0.1, 1.0); // Boost confidence for AI-validated suggestions
+            validatedSuggestions.push(suggestion);
+          } else {
+            console.log(`🤖 Rejected invalid suggestion: ${suggestion.originalText} -> ${suggestion.suggestedText}`);
+          }
+        } catch (error) {
+          console.warn('AI validation failed for suggestion, including anyway:', error);
+          suggestion.aiValidated = false;
+          suggestion.confidence = Math.max(suggestion.confidence - 0.1, 0.1); // Lower confidence for unvalidated suggestions
+          validatedSuggestions.push(suggestion);
+        }
+      }
+      
+      // Add a small delay between batches to avoid rate limiting
+      if (i + batchSize < suggestions.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
-    // Early deduplication before conflict resolution for better performance
-    const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
-    
-    // Resolve conflicts between overlapping suggestions
-    const resolvedSuggestions = this.resolveConflictingSuggestions(deduplicatedSuggestions);
-    
-    if (resolvedSuggestions.length !== deduplicatedSuggestions.length) {
-      console.log(`Conflict resolution: ${deduplicatedSuggestions.length} → ${resolvedSuggestions.length} suggestions`);
-    }
+    console.log(`🤖 AI Validation complete: ${validatedSuggestions.length}/${suggestions.length} suggestions validated`);
 
-    // Readability analysis
+    // Final deduplication and conflict resolution
+    const finalSuggestions = this.resolveConflictingSuggestions(
+      this.removeDuplicateSuggestions(validatedSuggestions)
+    );
+
+    // Calculate readability
     const readability = this.calculateReadability(text);
-    const complexWords = this.countComplexWords(words);
 
-    // Tone analysis (optional) - use OpenAI if available
+    // Optional tone analysis
     let toneAnalysis: ToneAnalysis | undefined;
-    if (includeTone && text.trim().length > 50) {
+    if (includeTone && text.length >= 50) {
       try {
-        // Use fast local tone analysis instead of slow AI
         toneAnalysis = await this.analyzeTone(text);
-        console.log('Using fast local tone analysis');
       } catch (error) {
         console.warn('Tone analysis failed:', error);
       }
     }
 
     return {
-      suggestions: resolvedSuggestions,
+      suggestions: finalSuggestions,
       readabilityScore: readability.score,
       readabilityGrade: readability.grade,
       wordCount,
       sentenceCount,
       characterCount,
-      averageWordsPerSentence: Math.round(averageWordsPerSentence * 10) / 10,
-      complexWords,
+      averageWordsPerSentence,
+      complexWords: this.countComplexWords(words),
       toneAnalysis
+    };
+  }
+
+  private convertToTextSuggestion(suggestion: any): TextSuggestion {
+    return {
+      id: `ai-${Date.now()}-${Math.random()}`,
+      type: suggestion.type || 'grammar',
+      severity: suggestion.severity || 'suggestion',
+      message: suggestion.message || '',
+      originalText: suggestion.originalText || '',
+      suggestedText: suggestion.suggestedText || '',
+      startIndex: suggestion.startIndex || 0,
+      endIndex: suggestion.endIndex || 0,
+      explanation: suggestion.explanation || '',
+      confidence: suggestion.confidence || 0.8,
+      alternatives: suggestion.alternatives,
+      wordsSaved: suggestion.wordsSaved
     };
   }
 
   private async checkGrammar(text: string): Promise<TextSuggestion[]> {
     const suggestions: TextSuggestion[] = [];
+    
+    // Use compromise.js for basic grammar analysis
     const doc = nlp(text);
-
-    // ✅ CAPITALIZATION CHECKS - Added comprehensive capitalization detection
-    const capitalizationSuggestions = this.checkCapitalization(text);
-    suggestions.push(...capitalizationSuggestions);
-
-    // Check for common grammar issues
     const sentences = doc.sentences().out('array');
     
     for (let i = 0; i < sentences.length; i++) {
       const sentence = sentences[i];
       const sentenceDoc = nlp(sentence);
       const startIndex = text.indexOf(sentence);
-
+      
       // Check for sentence fragments (no verb)
       const hasVerb = sentenceDoc.verbs().length > 0;
       if (!hasVerb && sentence.trim().length > 3) {
@@ -561,7 +401,8 @@ class TextAnalysisService {
           suggestedText: sentence.trim(),
           startIndex,
           endIndex: startIndex + sentence.length,
-          explanation: 'Consider adding a verb to make this a complete sentence.'
+          explanation: 'Consider adding a verb to make this a complete sentence.',
+          confidence: 0.7
         });
       }
 
@@ -577,76 +418,19 @@ class TextAnalysisService {
           suggestedText: sentence.trim(),
           startIndex,
           endIndex: startIndex + sentence.length,
-          explanation: 'Consider breaking this into shorter sentences for better readability.'
+          explanation: 'Consider breaking this into shorter sentences for better readability.',
+          confidence: 0.6
         });
-      }
-
-      // Check for passive voice
-      const passiveVerbs = sentenceDoc.match('#Passive').out('array');
-      if (passiveVerbs.length > 0) {
-        suggestions.push({
-          id: `grammar-${i}-passive`,
-          type: 'grammar',
-          severity: 'suggestion',
-          message: 'Consider using active voice',
-          originalText: sentence.trim(),
-          suggestedText: sentence.trim(),
-          startIndex,
-          endIndex: startIndex + sentence.length,
-          explanation: 'Active voice is often clearer and more engaging than passive voice.'
-        });
-      }
-    }
-
-    // Check for subject-verb agreement
-    const clauses = doc.clauses().out('array');
-    for (let i = 0; i < clauses.length; i++) {
-      const clause = clauses[i];
-      const clauseDoc = nlp(clause);
-      const subjects = clauseDoc.nouns().out('array');
-      const verbs = clauseDoc.verbs().out('array');
-
-      if (subjects.length > 0 && verbs.length > 0) {
-        // Only add suggestion if we detect specific agreement issues
-        // Check for common patterns like "I are", "he were", "they was", etc.
-        const commonErrors = [
-          /\b(I|he|she|it)\s+(are|were)\b/i,
-          /\b(they|we|you)\s+(was|is)\b/i,
-          /\b(there|their)\s*,/i, // "Their, I learned" should be "There, I learned"
-          /\b(your|you're)\s+(prestegious|prestigious)\b/i // "you're prestigious" should be "your prestigious"
-        ];
-        
-        for (const errorPattern of commonErrors) {
-          if (errorPattern.test(clause)) {
-            const startIndex = text.indexOf(clause);
-            if (startIndex >= 0) {
-              suggestions.push({
-                id: `grammar-${i}-agreement`,
-                type: 'grammar',
-                severity: 'warning',
-                message: 'Review subject-verb agreement',
-                originalText: clause.trim(),
-                suggestedText: clause.trim(),
-                startIndex,
-                endIndex: startIndex + clause.length,
-                explanation: 'Check that the subject and verb agree in number.'
-              });
-              break; // Only add one suggestion per clause
-            }
-          }
-        }
       }
     }
 
     // Check for common word usage errors
     const wordUsageErrors = [
-      { pattern: /\bdecided\s+too\s+volunteer\b/gi, message: 'Use "to" instead of "too" before verbs', correction: 'decided to volunteer' },
-      { pattern: /\bhow\s+too\s+\w+/gi, message: 'Use "to" instead of "too" before verbs', correction: 'how to' },
-      { pattern: /\bdue\s+too\s+the\b/gi, message: 'Use "to" instead of "too"', correction: 'due to the' },
-      { pattern: /\bdeserve\s+too\s+be\b/gi, message: 'Use "to" instead of "too" before verbs', correction: 'deserve to be' },
-      { pattern: /\bTheir,\s+I\b/gi, message: 'Use "There" to start a sentence about location or existence', correction: 'There, I' },
-      { pattern: /\bprepared\s+me\s+good\b/gi, message: 'Use "well" instead of "good" as an adverb', correction: 'prepared me well' },
-      { pattern: /\byou\'re\s+prestegious\b/gi, message: 'Use "your" (possessive) instead of "you\'re" (you are)', correction: 'your prestigious' }
+      { pattern: /\bdecided\s+too\s+volunteer\b/gi, message: 'Use "to" instead of "too" before verbs', correction: 'decided to volunteer', confidence: 0.9 },
+      { pattern: /\bhow\s+too\s+\w+/gi, message: 'Use "to" instead of "too" before verbs', correction: 'how to', confidence: 0.9 },
+      { pattern: /\bdue\s+too\s+the\b/gi, message: 'Use "to" instead of "too"', correction: 'due to the', confidence: 0.9 },
+      { pattern: /\bTheir,\s+I\b/gi, message: 'Use "There" to start a sentence about location or existence', correction: 'There, I', confidence: 0.8 },
+      { pattern: /\bprepared\s+me\s+good\b/gi, message: 'Use "well" instead of "good" as an adverb', correction: 'prepared me well', confidence: 0.9 }
     ];
 
     for (const error of wordUsageErrors) {
@@ -661,178 +445,9 @@ class TextAnalysisService {
           suggestedText: error.correction,
           startIndex: match.index,
           endIndex: match.index + match[0].length,
-          explanation: error.message
+          explanation: error.message,
+          confidence: error.confidence
         });
-      }
-    }
-
-    return suggestions;
-  }
-
-  /**
-   * ✅ COMPREHENSIVE CAPITALIZATION CHECKER
-   * Detects various capitalization errors including:
-   * - Sentences not starting with capital letters
-   * - Proper nouns not capitalized
-   * - Days, months, countries, cities
-   * - Personal pronouns (I)
-   * - Acronyms and abbreviations
-   */
-  private checkCapitalization(text: string): TextSuggestion[] {
-    const suggestions: TextSuggestion[] = [];
-    
-    // 1. Check sentence beginnings
-    const sentences = text.split(/[.!?]+\s*/);
-    let currentIndex = 0;
-    
-    for (let i = 0; i < sentences.length; i++) {
-      const sentence = sentences[i].trim();
-      if (sentence.length === 0) continue;
-      
-      const sentenceStart = text.indexOf(sentence, currentIndex);
-      if (sentenceStart >= 0 && sentence[0] && sentence[0] !== sentence[0].toUpperCase()) {
-        // Skip if it's a continuation after a colon or semicolon
-        const beforeSentence = text.substring(0, sentenceStart).trim();
-        const lastChar = beforeSentence[beforeSentence.length - 1];
-        
-        if (lastChar !== ':' && lastChar !== ';') {
-          const correctedSentence = sentence[0].toUpperCase() + sentence.slice(1);
-          suggestions.push({
-            id: `capitalization-sentence-${sentenceStart}`,
-            type: 'grammar',
-            severity: 'error',
-            message: 'Sentences should start with a capital letter',
-            originalText: sentence,
-            suggestedText: correctedSentence,
-            startIndex: sentenceStart,
-            endIndex: sentenceStart + sentence.length,
-            explanation: 'The first word of every sentence must be capitalized.'
-          });
-        }
-      }
-      currentIndex = sentenceStart + sentence.length;
-    }
-    
-    // 2. Check personal pronoun "I"
-    const iPattern = /\b(i)\b/g;
-    let match;
-    while ((match = iPattern.exec(text)) !== null) {
-      if (match[1] === 'i') { // Only if it's lowercase
-        suggestions.push({
-          id: `capitalization-i-${match.index}`,
-          type: 'grammar',
-          severity: 'error',
-          message: 'The pronoun "I" should always be capitalized',
-          originalText: 'i',
-          suggestedText: 'I',
-          startIndex: match.index,
-          endIndex: match.index + 1,
-          explanation: 'The first-person singular pronoun "I" is always capitalized in English.'
-        });
-      }
-    }
-    
-    // 3. Check proper nouns - Days of the week
-    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    for (const day of days) {
-      const dayPattern = new RegExp(`\\b${day}\\b`, 'gi');
-      let match;
-      while ((match = dayPattern.exec(text)) !== null) {
-        if (match[0] !== match[0][0].toUpperCase() + match[0].slice(1).toLowerCase()) {
-          const corrected = match[0][0].toUpperCase() + match[0].slice(1).toLowerCase();
-          suggestions.push({
-            id: `capitalization-day-${match.index}`,
-            type: 'grammar',
-            severity: 'error',
-            message: 'Days of the week should be capitalized',
-            originalText: match[0],
-            suggestedText: corrected,
-            startIndex: match.index,
-            endIndex: match.index + match[0].length,
-            explanation: 'Days of the week are proper nouns and must be capitalized.'
-          });
-        }
-      }
-    }
-    
-    // 4. Check proper nouns - Months
-    const months = ['january', 'february', 'march', 'april', 'may', 'june', 
-                    'july', 'august', 'september', 'october', 'november', 'december'];
-    for (const month of months) {
-      const monthPattern = new RegExp(`\\b${month}\\b`, 'gi');
-      let match;
-      while ((match = monthPattern.exec(text)) !== null) {
-        if (match[0] !== match[0][0].toUpperCase() + match[0].slice(1).toLowerCase()) {
-          const corrected = match[0][0].toUpperCase() + match[0].slice(1).toLowerCase();
-          suggestions.push({
-            id: `capitalization-month-${match.index}`,
-            type: 'grammar',
-            severity: 'error',
-            message: 'Months should be capitalized',
-            originalText: match[0],
-            suggestedText: corrected,
-            startIndex: match.index,
-            endIndex: match.index + match[0].length,
-            explanation: 'Months are proper nouns and must be capitalized.'
-          });
-        }
-      }
-    }
-    
-    // 5. Check common proper nouns - Countries, cities, languages
-    const properNouns = [
-      'america', 'american', 'united states', 'usa', 'canada', 'canadian', 'mexico', 'mexican',
-      'england', 'english', 'britain', 'british', 'france', 'french', 'germany', 'german',
-      'spain', 'spanish', 'italy', 'italian', 'china', 'chinese', 'japan', 'japanese',
-      'new york', 'california', 'texas', 'florida', 'chicago', 'los angeles', 'boston',
-      'harvard', 'stanford', 'mit', 'yale', 'princeton', 'columbia', 'berkeley',
-      'christian', 'christianity', 'muslim', 'islam', 'jewish', 'judaism', 'hindu', 'hinduism',
-      'god', 'jesus', 'allah', 'buddha'
-    ];
-    
-    for (const noun of properNouns) {
-      const nounPattern = new RegExp(`\\b${noun.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-      let match;
-      while ((match = nounPattern.exec(text)) !== null) {
-        const words = match[0].split(/\s+/);
-        const corrected = words.map(word => word[0].toUpperCase() + word.slice(1).toLowerCase()).join(' ');
-        
-        if (match[0] !== corrected) {
-          suggestions.push({
-            id: `capitalization-proper-${match.index}`,
-            type: 'grammar',
-            severity: 'error',
-            message: 'Proper nouns should be capitalized',
-            originalText: match[0],
-            suggestedText: corrected,
-            startIndex: match.index,
-            endIndex: match.index + match[0].length,
-            explanation: 'Names of places, people, languages, religions, and institutions are proper nouns and must be capitalized.'
-          });
-        }
-      }
-    }
-    
-    // 6. Check for titles and honorifics
-    const titles = ['mr', 'mrs', 'ms', 'dr', 'prof', 'professor', 'president', 'senator', 'governor'];
-    for (const title of titles) {
-      const titlePattern = new RegExp(`\\b${title}\\b`, 'gi');
-      let match;
-      while ((match = titlePattern.exec(text)) !== null) {
-        if (match[0] !== match[0][0].toUpperCase() + match[0].slice(1).toLowerCase()) {
-          const corrected = match[0][0].toUpperCase() + match[0].slice(1).toLowerCase();
-          suggestions.push({
-            id: `capitalization-title-${match.index}`,
-            type: 'grammar',
-            severity: 'error',
-            message: 'Titles and honorifics should be capitalized',
-            originalText: match[0],
-            suggestedText: corrected,
-            startIndex: match.index,
-            endIndex: match.index + match[0].length,
-            explanation: 'Titles and honorifics are proper nouns and must be capitalized.'
-          });
-        }
       }
     }
 
@@ -843,7 +458,7 @@ class TextAnalysisService {
     const suggestions: TextSuggestion[] = [];
     
     // ⚡ INSTANT BROWSER-COMPATIBLE SPELL CHECKER
-    // Common misspellings that high school students make
+    // Common misspellings that high school students make (REMOVED PROBLEMATIC HOMOPHONES)
     const commonMisspellings: { [key: string]: string[] } = {
       // Common typos
       'teh': ['the'],
@@ -881,29 +496,125 @@ class TextAnalysisService {
       'wrotes': ['wrote'],
       'writed': ['wrote'],
       
-      // Compound word errors and split word typos - NEW ADDITION
+      // Common misspellings from student writing
+      'comunicate': ['communicate'],
+      'comunicated': ['communicated'],
+      'comunicating': ['communicating'],
+      'comunication': ['communication'],
+      'familys': ['families'],
+      'prestegious': ['prestigious'],
+      'prestegous': ['prestigious'],
+      'intrested': ['interested'],
+      'intrest': ['interest'],
+      'experiance': ['experience'],
+      'experiances': ['experiences'],
+      'experianced': ['experienced'],
+      'volenteer': ['volunteer'],
+      'volenteered': ['volunteered'],
+      'volenteering': ['volunteering'],
+      'helpfull': ['helpful'],
+      'successfull': ['successful'],
+      'beautifull': ['beautiful'],
+      'wonderfull': ['wonderful'],
+      'carefull': ['careful'],
+      'usefull': ['useful'],
+      'peacefull': ['peaceful'],
+      'powerfull': ['powerful'],
+      'meaningfull': ['meaningful'],
+      'gratefull': ['grateful'],
+      'respectfull': ['respectful'],
+      'successfuly': ['successfully'],
+      'realy': ['really'],
+      'finaly': ['finally'],
+      'specialy': ['especially'],
+      'basicaly': ['basically'],
+      'totaly': ['totally'],
+      'usualy': ['usually'],
+      'actualy': ['actually'],
+      'personaly': ['personally'],
+      'generaly': ['generally'],
+      'especialy': ['especially'],
+      'diferent': ['different'],
+      'diference': ['difference'],
+      'importent': ['important'],
+      'importence': ['importance'],
+      'excelent': ['excellent'],
+      'excelence': ['excellence'],
+      'responsable': ['responsible'],
+      'responsability': ['responsibility'],
+      'oportunity': ['opportunity'],
+      'oportunities': ['opportunities'],
+      'recomend': ['recommend'],
+      'recomended': ['recommended'],
+      'recomendation': ['recommendation'],
+      'comited': ['committed'],
+      'comitment': ['commitment'],
+      'comunity': ['community'],
+      'comunities': ['communities'],
+      'knowlege': ['knowledge'],
+      'knowlegeable': ['knowledgeable'],
+      'challange': ['challenge'],
+      'challanged': ['challenged'],
+      'challanging': ['challenging'],
+      'succesful': ['successful'],
+      'succesfully': ['successfully'],
+      'succes': ['success'],
+      'sucess': ['success'],
+      'sucessful': ['successful'],
+      'sucessfully': ['successfully'],
+      'buisness': ['business'],
+      'buisneses': ['businesses'],
+      'profesional': ['professional'],
+      'profesionalism': ['professionalism'],
+      'profesionally': ['professionally'],
+      'profesion': ['profession'],
+      'carrer': ['career'],
+      'carrers': ['careers'],
+      'collage': ['college'],
+      'collages': ['colleges'],
+      'univercity': ['university'],
+      'univercities': ['universities'],
+      'studing': ['studying'],
+      'studys': ['studies'],
+      'studyed': ['studied'],
+      'learing': ['learning'],
+      'learnt': ['learned'],
+      'teached': ['taught'],
+      'choosed': ['chose'],
+      'payed': ['paid'],
+      'sayed': ['said'],
+      'goed': ['went'],
+      'taked': ['took'],
+      'maked': ['made'],
+      'gived': ['gave'],
+      'getted': ['got'],
+      'putted': ['put'],
+      'cutted': ['cut'],
+      'hitted': ['hit'],
+      'letted': ['let'],
+      'sitted': ['sat'],
+      'runned': ['ran'],
+      'winned': ['won'],
+      'losed': ['lost'],
+      'finded': ['found'],
+      'thinked': ['thought'],
+      'bringed': ['brought'],
+      'buyed': ['bought'],
+      'catched': ['caught'],
+      'feeled': ['felt'],
+      'keeped': ['kept'],
+      'leaved': ['left'],
+      'meaned': ['meant'],
+      'sended': ['sent'],
+      'spended': ['spent'],
+      'standed': ['stood'],
+      'telled': ['told'],
+      'understanded': ['understood'],
+      
+      // Compound word errors and split word typos
       'woul dbe': ['would be'],
       'coul dbe': ['could be'],
       'shoul dbe': ['should be'],
-      'woul dhave': ['would have'],
-      'coul dhave': ['could have'],
-      'shoul dhave': ['should have'],
-      'ther eis': ['there is'],
-      'ther eare': ['there are'],
-      'i tis': ['it is'],
-      'i twas': ['it was'],
-      'i nthe': ['in the'],
-      'o nthe': ['on the'],
-      'a tthe': ['at the'],
-      'fo rthe': ['for the'],
-      'wit hthe': ['with the'],
-      'fro mthe': ['from the'],
-      'abou tthe': ['about the'],
-      'int othe': ['into the'],
-      'ou tof': ['out of'],
-      'becaus eof': ['because of'],
-      'instea dof': ['instead of'],
-      'a lot': ['a lot'], // Common misconception - this is actually correct
       'alot': ['a lot'],
       'al ot': ['a lot'],
       'alo t': ['a lot'],
@@ -941,14 +652,8 @@ class TextAnalysisService {
       'wouldnt': ["wouldn't"],
       'couldnt': ["couldn't"],
       
-      // Homophones
-      'your': ['you\'re'], // Context dependent
-      'there': ['their', 'they\'re'], // Context dependent
-      'its': ['it\'s'], // Context dependent
-      'to': ['too', 'two'], // Context dependent
-      'then': ['than'], // Context dependent
-      'affect': ['effect'], // Context dependent
-      'accept': ['except'], // Context dependent
+      // NOTE: Removed problematic context-dependent homophones that cause false positives
+      // These will be handled by AI validation instead
       
       // Common academic writing errors
       'alright': ['all right'],
@@ -998,17 +703,18 @@ class TextAnalysisService {
       if (commonMisspellings[word]) {
         const wordStart = text.indexOf(originalWord, currentIndex);
         if (wordStart !== -1) {
-                                suggestions.push({
-             id: `spell-${Date.now()}-${i}`,
-             type: 'spelling',
-             severity: 'error',
-             message: `"${originalWord}" may be misspelled`,
-             originalText: originalWord,
-             suggestedText: commonMisspellings[word][0],
-             startIndex: wordStart,
-             endIndex: wordStart + originalWord.length,
-             explanation: `Did you mean "${commonMisspellings[word][0]}"?`
-           });
+          suggestions.push({
+            id: `spell-${Date.now()}-${i}`,
+            type: 'spelling',
+            severity: 'error',
+            message: `"${originalWord}" may be misspelled`,
+            originalText: originalWord,
+            suggestedText: commonMisspellings[word][0],
+            startIndex: wordStart,
+            endIndex: wordStart + originalWord.length,
+            explanation: `Did you mean "${commonMisspellings[word][0]}"?`,
+            confidence: 0.8
+          });
         }
       }
       
@@ -1020,17 +726,18 @@ class TextAnalysisService {
         if (commonMisspellings[twoWordPhrase]) {
           const phraseStart = text.indexOf(originalTwoWords, currentIndex);
           if (phraseStart !== -1) {
-        suggestions.push({
-               id: `spell-compound-${Date.now()}-${i}`,
-          type: 'spelling',
-          severity: 'error',
-               message: `"${originalTwoWords}" appears to be a compound error`,
-               originalText: originalTwoWords,
-               suggestedText: commonMisspellings[twoWordPhrase][0],
-               startIndex: phraseStart,
-               endIndex: phraseStart + originalTwoWords.length,
-               explanation: `Did you mean "${commonMisspellings[twoWordPhrase][0]}"?`
-             });
+            suggestions.push({
+              id: `spell-compound-${Date.now()}-${i}`,
+              type: 'spelling',
+              severity: 'error',
+              message: `"${originalTwoWords}" appears to be a compound error`,
+              originalText: originalTwoWords,
+              suggestedText: commonMisspellings[twoWordPhrase][0],
+              startIndex: phraseStart,
+              endIndex: phraseStart + originalTwoWords.length,
+              explanation: `Did you mean "${commonMisspellings[twoWordPhrase][0]}"?`,
+              confidence: 0.8
+            });
             i++; // Skip next word since we processed it as part of compound
           }
         }
@@ -1069,7 +776,8 @@ class TextAnalysisService {
             suggestedText: match[0],
             startIndex: match.index,
             endIndex: match.index + match[0].length,
-            explanation: 'Consider using synonyms to avoid repetition.'
+            explanation: 'Consider using synonyms to avoid repetition.',
+            confidence: 0.6
           });
         }
       }
@@ -1090,7 +798,8 @@ class TextAnalysisService {
           suggestedText: '',
           startIndex: match.index,
           endIndex: match.index + match[0].length,
-          explanation: 'Removing weak words can make your writing more direct and powerful.'
+          explanation: 'Removing weak words can make your writing more direct and powerful.',
+          confidence: 0.7
         });
       }
     }
@@ -1118,7 +827,8 @@ class TextAnalysisService {
             suggestedText: longestSentence.trim(),
             startIndex,
             endIndex: startIndex + longestSentence.length,
-            explanation: 'Mix short and long sentences to improve readability and flow.'
+            explanation: 'Mix short and long sentences to improve readability and flow.',
+            confidence: 0.5
           });
         }
       }
@@ -1194,7 +904,8 @@ class TextAnalysisService {
             suggestedText: firstSentence.trim(),
             startIndex,
             endIndex: startIndex + firstSentence.length,
-            explanation: 'Personal statements are stronger when they highlight specific experiences and contributions using first-person language.'
+            explanation: 'Personal statements are stronger when they highlight specific experiences and contributions using first-person language.',
+            confidence: 0.6
           });
         }
       }
@@ -1219,7 +930,8 @@ class TextAnalysisService {
             suggestedText: lastSentence.trim(),
             startIndex,
             endIndex: startIndex + lastSentence.length,
-            explanation: 'Personal statements are stronger when they highlight specific achievements using action words like "achieved," "led," or "created."'
+            explanation: 'Personal statements are stronger when they highlight specific achievements using action words like "achieved," "led," or "created."',
+            confidence: 0.6
           });
         }
       }
@@ -1934,7 +1646,8 @@ Suggest corrections to maintain consistent tone and voice.`;
             suggestedText: sentence.trim(), // Would need more complex logic for actual correction
             startIndex,
             endIndex: startIndex + sentence.length,
-            explanation: 'The subject and verb do not agree in number.'
+            explanation: 'The subject and verb do not agree in number.',
+            confidence: 0.7
           });
         }
       }
@@ -2022,7 +1735,8 @@ Suggest corrections to maintain consistent tone and voice.`;
               suggestedText: '[specify what this refers to]',
               startIndex,
               endIndex: startIndex + pronoun.length,
-              explanation: 'This pronoun reference is unclear or ambiguous.'
+              explanation: 'This pronoun reference is unclear or ambiguous.',
+              confidence: 0.6
             });
           }
         }
@@ -2055,7 +1769,8 @@ Suggest corrections to maintain consistent tone and voice.`;
         suggestedText: 'Use consistent number formatting',
         startIndex: 0,
         endIndex: text.length,
-        explanation: 'Use either numeric (1, 2, 3) or written (one, two, three) format consistently.'
+        explanation: 'Use either numeric (1, 2, 3) or written (one, two, three) format consistently.',
+        confidence: 0.6
       });
     }
     
