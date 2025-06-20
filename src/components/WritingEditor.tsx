@@ -29,6 +29,8 @@ interface WritingEditorProps {
 }
 
 export default function WritingEditor({ documentId }: WritingEditorProps) {
+  console.log('WritingEditor: Component rendering started')
+  
   const navigate = useNavigate()
   const { 
     currentDocument, 
@@ -50,6 +52,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const [showExportDropdown, setShowExportDropdown] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
 
+  console.log('WritingEditor: State initialized')
+
   // Close export dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -66,11 +70,13 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   // Load document
   useEffect(() => {
     if (documentId) {
+      console.log('WritingEditor: Loading document with ID:', documentId)
       loadDocuments().then(() => {
         const doc = useDocumentStore.getState().documents.find(d => d.id === documentId)
         if (doc) {
           setCurrentDocument(doc)
           setContent(doc.content || '')
+          console.log('WritingEditor: Document loaded successfully')
         }
       })
     }
@@ -88,10 +94,12 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
       setIsAutoAnalyzing(true)
       try {
+        console.log('WritingEditor: Starting auto-analysis')
         const result = await textAnalysisService.analyzeTextInstant(content)
         setAnalysis(result)
+        console.log('WritingEditor: Auto-analysis completed')
       } catch (error) {
-        console.error('Auto-analysis failed:', error)
+        console.error('WritingEditor: Auto-analysis failed:', error)
       } finally {
         setIsAutoAnalyzing(false)
       }
@@ -101,17 +109,20 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }, [content])
 
   const handleContentChange = (newContent: string) => {
+    console.log('WritingEditor: Content changed, length:', newContent.length)
     setContent(newContent)
   }
 
   const handleSave = async () => {
     if (!currentDocument) return
     
+    console.log('WritingEditor: Saving document')
     setIsSaving(true)
     try {
       await updateDocument(currentDocument.id, { content })
+      console.log('WritingEditor: Document saved successfully')
     } catch (error) {
-      console.error('Save failed:', error)
+      console.error('WritingEditor: Save failed:', error)
     } finally {
       setIsSaving(false)
     }
@@ -120,6 +131,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const handleExport = async (format: 'txt' | 'md' | 'docx' | 'pdf') => {
     if (!currentDocument || !content.trim()) return
     
+    console.log('WritingEditor: Exporting as', format)
     setIsExporting(true)
     setShowExportDropdown(false)
     
@@ -141,8 +153,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           ExportService.exportAsPdf(content, filename, title)
           break
       }
+      console.log('WritingEditor: Export completed successfully')
     } catch (error) {
-      console.error('Export failed:', error)
+      console.error('WritingEditor: Export failed:', error)
       alert('Export failed. Please try again.')
     } finally {
       setIsExporting(false)
@@ -153,16 +166,19 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     if (!currentDocument) return
     
     if (confirm('Are you sure you want to delete this document?')) {
+      console.log('WritingEditor: Deleting document')
       try {
         await deleteDocument(currentDocument.id)
         navigate('/dashboard')
+        console.log('WritingEditor: Document deleted successfully')
       } catch (error) {
-        console.error('Delete failed:', error)
+        console.error('WritingEditor: Delete failed:', error)
       }
     }
   }
 
   const applySuggestion = (suggestion: TextSuggestion) => {
+    console.log('WritingEditor: Applying suggestion:', suggestion.type)
     const beforeText = content.slice(0, suggestion.startIndex)
     const afterText = content.slice(suggestion.endIndex)
     const newContent = beforeText + suggestion.suggestedText + afterText
@@ -176,6 +192,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }
 
   const dismissSuggestion = (suggestionId: string) => {
+    console.log('WritingEditor: Dismissing suggestion:', suggestionId)
     if (analysis) {
       const updatedSuggestions = analysis.suggestions.filter(s => s.id !== suggestionId)
       setAnalysis({ ...analysis, suggestions: updatedSuggestions })
@@ -185,6 +202,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const applyAllSuggestions = () => {
     if (!analysis?.suggestions.length) return
     
+    console.log('WritingEditor: Applying all suggestions, count:', analysis.suggestions.length)
     const sortedSuggestions = [...analysis.suggestions].sort((a, b) => b.startIndex - a.startIndex)
     
     let newContent = content
@@ -199,102 +217,91 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }
 
   const handleToneAnalysis = async () => {
-    if (content.length < 50) return
+    if (!content.trim() || content.length < 50) return
     
+    console.log('WritingEditor: Starting tone analysis')
     setIsRunningToneAnalysis(true)
     try {
-      const toneAnalysis = await textAnalysisService.analyzeToneOnly(content)
-      setAnalysis(prev => prev ? { ...prev, toneAnalysis } : {
-        suggestions: [],
-        readabilityScore: 0,
-        readabilityGrade: 'N/A',
-        wordCount: content.trim().split(/\s+/).filter(w => w.length > 0).length,
-        sentenceCount: content.split(/[.!?]+/).filter(s => s.trim().length > 0).length,
-        characterCount: content.length,
-        averageWordsPerSentence: 0,
-        complexWords: 0,
-        toneAnalysis
-      })
-      setShowToneAnalysis(true)
+      const result = await textAnalysisService.analyzeToneOnly(content)
+      if (result && analysis) {
+        setAnalysis({ ...analysis, toneAnalysis: result })
+        setShowToneAnalysis(true)
+        console.log('WritingEditor: Tone analysis completed')
+      }
     } catch (error) {
-      console.error('Tone analysis failed:', error)
+      console.error('WritingEditor: Tone analysis failed:', error)
     } finally {
       setIsRunningToneAnalysis(false)
     }
   }
 
   const handleManualAIAnalysis = async () => {
-    if (!content || isAnalyzing) return
+    if (!content.trim()) return
     
+    console.log('WritingEditor: Starting manual AI analysis')
     setIsAnalyzing(true)
     try {
       const result = await textAnalysisService.analyzeText(content)
       setAnalysis(result)
+      console.log('WritingEditor: Manual AI analysis completed')
     } catch (error) {
-      console.error('Manual analysis failed:', error)
+      console.error('WritingEditor: Manual AI analysis failed:', error)
     } finally {
       setIsAnalyzing(false)
     }
   }
 
   const getSuggestionCardProps = (suggestion: TextSuggestion) => {
+    console.log('WritingEditor: Getting suggestion card props for:', suggestion.type)
+    
     switch (suggestion.type) {
-      case 'spelling':
-        return {
-          icon: <AlertCircle className="h-4 w-4 text-red-500" />,
-          bgColor: 'bg-red-50',
-          borderColor: 'border-red-200',
-          titleColor: 'text-red-800',
-        }
       case 'grammar':
         return {
-          icon: <CheckCircle className="h-4 w-4 text-yellow-500" />,
-          bgColor: 'bg-yellow-50',
-          borderColor: 'border-yellow-200',
-          titleColor: 'text-yellow-800',
+          icon: <AlertCircle size={16} className="text-red-500" />,
+          bgColor: 'bg-red-50',
+          borderColor: 'border-red-200',
+          titleColor: 'text-red-800'
+        }
+      case 'spelling':
+        return {
+          icon: <AlertCircle size={16} className="text-orange-500" />,
+          bgColor: 'bg-orange-50',
+          borderColor: 'border-orange-200',
+          titleColor: 'text-orange-800'
         }
       case 'style':
         return {
-          icon: <Sparkles className="h-4 w-4 text-blue-500" />,
+          icon: <Lightbulb size={16} className="text-blue-500" />,
           bgColor: 'bg-blue-50',
           borderColor: 'border-blue-200',
-          titleColor: 'text-blue-800',
-        }
-      case 'vocabulary':
-        return {
-          icon: <Lightbulb className="h-4 w-4 text-purple-500" />,
-          bgColor: 'bg-purple-50',
-          borderColor: 'border-purple-200',
-          titleColor: 'text-purple-800',
+          titleColor: 'text-blue-800'
         }
       default:
         return {
-          icon: <CheckCircle className="h-4 w-4 text-gray-500" />,
-          bgColor: 'bg-gray-50',
-          borderColor: 'border-gray-200',
-          titleColor: 'text-gray-800',
+          icon: <CheckCircle size={16} className="text-green-500" />,
+          bgColor: 'bg-green-50',
+          borderColor: 'border-green-200',
+          titleColor: 'text-green-800'
         }
     }
   }
 
   const SuggestionCard = ({ suggestion }: { suggestion: TextSuggestion }) => {
-    const cardProps = getSuggestionCardProps(suggestion)
+    console.log('WritingEditor: Rendering SuggestionCard for:', suggestion.id)
+    const props = getSuggestionCardProps(suggestion)
     
     return (
-      <div className={`p-3 rounded-lg border transition-all ${cardProps.borderColor} ${cardProps.bgColor}`}>
-        <div className="flex items-start">
-          <div className="mr-2 flex-shrink-0">{cardProps.icon}</div>
-          <div className="flex-1 min-w-0">
-            <p className={`text-sm font-medium ${cardProps.titleColor} capitalize`}>
-              {suggestion.type.replace('-', ' ')}
-            </p>
-            <p className="text-sm text-gray-700 mt-1">
-              {suggestion.message}
-            </p>
+      <div className={`p-3 rounded-lg border ${props.bgColor} ${props.borderColor}`}>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center space-x-2">
+            {props.icon}
+            <span className={`text-sm font-medium ${props.titleColor}`}>
+              {suggestion.type.charAt(0).toUpperCase() + suggestion.type.slice(1)}
+            </span>
           </div>
           <button 
             onClick={() => dismissSuggestion(suggestion.id)} 
-            className="p-1 -mr-1 -mt-1 rounded-full text-gray-400 hover:bg-gray-200"
+            className="text-gray-400 hover:text-gray-600"
           >
             <X size={14} />
           </button>
@@ -328,7 +335,10 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     )
   }
 
+  console.log('WritingEditor: About to render JSX')
+
   if (!currentDocument) {
+    console.log('WritingEditor: No current document, rendering placeholder')
     return (
       <div className="flex items-center justify-center h-full bg-gray-50">
         <div className="text-center">
@@ -346,6 +356,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     )
   }
 
+  console.log('WritingEditor: Rendering main editor interface')
+  
   const words = content.trim().split(/\s+/).filter(word => word.length > 0)
   const wordCount = analysis?.wordCount || words.length
 
@@ -449,6 +461,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
             onChange={handleContentChange}
             suggestions={analysis?.suggestions || []}
             onSuggestionClick={(suggestion, element) => {
+              console.log('WritingEditor: Suggestion clicked:', suggestion.id)
               const rect = element.getBoundingClientRect()
               setSelectedSuggestion(suggestion)
               setTooltipPosition({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY })
@@ -520,15 +533,18 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           suggestion={selectedSuggestion}
           position={tooltipPosition}
           onApply={() => {
+            console.log('WritingEditor: Applying suggestion from tooltip')
             if (selectedSuggestion) applySuggestion(selectedSuggestion)
             setSelectedSuggestion(null)
             setTooltipPosition(null)
           }}
           onClose={() => {
+            console.log('WritingEditor: Closing tooltip')
             setSelectedSuggestion(null)
             setTooltipPosition(null)
           }}
           onDismiss={() => {
+            console.log('WritingEditor: Dismissing suggestion from tooltip')
             if (selectedSuggestion) dismissSuggestion(selectedSuggestion.id)
             setSelectedSuggestion(null)
             setTooltipPosition(null)
@@ -541,7 +557,10 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         <ToneAnalysisPanel
           toneAnalysis={analysis.toneAnalysis}
           isLoading={isRunningToneAnalysis}
-          onClose={() => setShowToneAnalysis(false)}
+          onClose={() => {
+            console.log('WritingEditor: Closing tone analysis panel')
+            setShowToneAnalysis(false)
+          }}
         />
       )}
     </div>
