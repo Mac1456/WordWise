@@ -654,11 +654,12 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const isAnyAnalysisRunning = isAnalyzing || isAutoAnalyzing || isRunningToneAnalysis
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Editor */}
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Editor */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200">
             {/* Header */}
             <div className="border-b border-gray-200 p-4">
               <div className="flex items-center justify-between">
@@ -679,7 +680,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={handleDownload}
-                    className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                    className="flex items-center px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 transition-all shadow-sm"
                   >
                     <Download className="h-4 w-4 mr-1" />
                     Download
@@ -687,7 +688,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   <button
                     onClick={handleSave}
                     disabled={isSaving}
-                    className="flex items-center px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white text-sm rounded-lg hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
                     <Save className="h-4 w-4 mr-1" />
                     {isSaving ? 'Saving...' : 'Save'}
@@ -695,7 +696,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   <button
                     onClick={handleManualAIAnalysis}
                     disabled={isAnalyzing || content.trim().length < 20}
-                    className="flex items-center px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm rounded-lg hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
                     <Lightbulb className="h-4 w-4 mr-1" />
                     {isAnalyzing ? 'Analyzing...' : 'AI Analysis'}
@@ -703,7 +704,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   <button
                     onClick={handleToneAnalysis}
                     disabled={isRunningToneAnalysis || content.trim().length < 50}
-                    className="flex items-center px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center px-3 py-1.5 bg-gradient-to-r from-purple-600 to-violet-600 text-white text-sm rounded-lg hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
                     <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h3a1 1 0 110 2H5a1 1 0 110-2h2z" />
@@ -714,7 +715,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   </button>
                   <button
                     onClick={handleDelete}
-                    className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"
+                    className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-red-600 to-rose-600 rounded-lg hover:from-red-700 hover:to-rose-700 transition-all shadow-sm"
                   >
                     <Trash2 className="h-4 w-4 mr-1" />
                     Delete
@@ -858,7 +859,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
         {/* Suggestions Sidebar */}
         <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sticky top-6 max-h-screen overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sticky top-6 max-h-screen overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-medium text-gray-900">Suggestions</h3>
               <div className="flex items-center space-x-2">
@@ -1085,6 +1086,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           }}
         />
       )}
+    </div>
     </div>
   )
 } 

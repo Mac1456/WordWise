@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
 import { useDocumentStore, Document } from '../stores/documentStore'
-import { PlusCircle, FileText, Calendar, BarChart3, Trash2, Edit } from 'lucide-react'
+import { PlusCircle, FileText, Calendar, BarChart3, Trash2, Edit, User, Settings } from 'lucide-react'
 import { isDevelopment } from '../lib/firebase'
 
 // Simple date formatting function to replace date-fns
@@ -68,14 +68,29 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome back, {user?.email?.split('@')[0]}!
-        </h1>
-        <p className="mt-2 text-gray-600">
-          Organize and manage your personal statements and essays in one place.
-        </p>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">
+                Welcome back, {user?.email?.split('@')[0]}!
+              </h1>
+              <p className="mt-2 text-gray-600">
+                Organize and manage your personal statements and essays in one place.
+              </p>
+            </div>
+            <Link
+              to="/account"
+              className="flex items-center space-x-2 p-3 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors group"
+              title="Account Settings"
+            >
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center group-hover:from-blue-600 group-hover:to-indigo-700 transition-all">
+                <User className="h-5 w-5 text-white" />
+              </div>
+              <Settings className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+          </div>
         {/* Development Mode Indicator */}
         {isDevelopment && (
           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -208,16 +223,17 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Quick Tips */}
-      <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-blue-900 mb-3">Writing Tips for Personal Statements</h3>
-        <ul className="space-y-2 text-blue-800">
-          <li>• Start with a compelling hook that showcases your unique perspective</li>
-          <li>• Use specific examples to demonstrate leadership and resilience</li>
-          <li>• Keep your tone authentic and sincere throughout</li>
-          <li>• Stay within the 650-word limit while telling your complete story</li>
-          <li>• Use WordWise to organize and track progress on multiple essays</li>
-        </ul>
+        {/* Quick Tips */}
+        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-blue-900 mb-3">Writing Tips for Personal Statements</h3>
+          <ul className="space-y-2 text-blue-800">
+            <li>• Start with a compelling hook that showcases your unique perspective</li>
+            <li>• Use specific examples to demonstrate leadership and resilience</li>
+            <li>• Keep your tone authentic and sincere throughout</li>
+            <li>• Stay within the 650-word limit while telling your complete story</li>
+            <li>• Use WordWise to organize and track progress on multiple essays</li>
+          </ul>
+        </div>
       </div>
     </div>
   )

@@ -180,7 +180,7 @@ export default function HighlightedTextArea({
   }, [suggestions, onSuggestionClick]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative">
       {/* Highlight overlay - positioned behind textarea */}
       <div
         ref={highlightRef}
@@ -208,7 +208,7 @@ export default function HighlightedTextArea({
         onChange={(e) => onChange(e.target.value)}
         onScroll={handleScroll}
         placeholder={placeholder}
-        className={`relative resize-none focus:outline-none w-full h-full ${className}`}
+        className={`relative resize-none focus:outline-none ${className}`}
         style={{
           zIndex: 2,
           background: 'transparent',

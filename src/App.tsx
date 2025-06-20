@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import DashboardPage from './pages/DashboardPage'
 import EditorPage from './pages/EditorPage'
+import AccountPage from './pages/AccountPage'
 
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route path="/editor" element={<EditorPage />} />
           <Route path="/editor/:documentId" element={<EditorPage />} />
         </Routes>
