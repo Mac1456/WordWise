@@ -113,6 +113,332 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
   }
 
   /**
+   * 🎯 CONTEXT-BASED ERROR DETECTION
+   * Advanced local checking for homophones, grammar, and context-dependent errors
+   * This works entirely locally without AI dependencies
+   */
+  private checkContextBasedErrors(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Convert to lowercase for analysis, but preserve original case for replacements
+    const lowerText = text.toLowerCase();
+    const words = text.split(/(\s+|[^\w']+)/).filter(word => word.trim().length > 0);
+    
+    // 🎯 CONTEXT-DEPENDENT HOMOPHONES
+    suggestions.push(...this.checkContextualHomophones(text, lowerText));
+    
+    // 🎯 SUBJECT-VERB AGREEMENT
+    suggestions.push(...this.checkSubjectVerbAgreement(text));
+    
+    // 🎯 POSSESSIVE VS PLURAL ERRORS
+    suggestions.push(...this.checkPossessiveErrors(text));
+    
+    // 🎯 ARTICLE USAGE (a/an)
+    suggestions.push(...this.checkArticleUsage(text));
+    
+    // 🎯 PREPOSITION ERRORS
+    suggestions.push(...this.checkPrepositionErrors(text));
+    
+    return suggestions;
+  }
+
+  /**
+   * Check context-dependent homophones like there/their/they're, your/you're, etc.
+   */
+  private checkContextualHomophones(text: string, lowerText: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Define homophone patterns with context rules
+    const homophoneRules = [
+      // THERE vs THEIR vs THEY'RE
+      {
+        word: 'there',
+        patterns: [
+          { 
+            context: /\bthere\s+(is|are|was|were|will|would|should|could|might)\b/g,
+            correct: true,
+            explanation: '"There" is correct when indicating existence or location'
+          },
+          { 
+            context: /\b(go|over|right|back|up|down|out)\s+there\b/g,
+            correct: true,
+            explanation: '"There" is correct when indicating location'
+          },
+          { 
+            context: /\bthere\s+(car|house|book|dog|cat|family|parents|children|friends|job|work|school|college|university|home|room|desk|computer|phone|money|time|life|future|dreams|goals|plans|ideas|thoughts|feelings|emotions|experiences|memories|stories|problems|issues|challenges|opportunities|skills|talents|abilities|knowledge|education|learning|studying|reading|writing|speaking|listening|thinking|understanding|believing|hoping|wishing|wanting|needing|loving|caring|helping|supporting|encouraging|inspiring|motivating|teaching|training|coaching|mentoring|guiding|leading|following|working|playing|exercising|running|walking|swimming|dancing|singing|cooking|eating|sleeping|resting|relaxing|traveling|exploring|discovering|creating|building|making|designing|planning|organizing|managing|controlling|directing|supervising|monitoring|evaluating|analyzing|researching|investigating|studying|learning|practicing|improving|developing|growing|changing|evolving|adapting|adjusting|modifying|updating|upgrading|enhancing|optimizing|maximizing|minimizing|reducing|increasing|expanding|extending|stretching|reaching|achieving|accomplishing|succeeding|winning|gaining|earning|receiving|getting|obtaining|acquiring|purchasing|buying|selling|trading|exchanging|sharing|giving|donating|contributing|participating|joining|belonging|connecting|communicating|talking|discussing|debating|arguing|agreeing|disagreeing|compromising|negotiating|resolving|solving|fixing|repairing|healing|recovering|improving|progressing|advancing|moving|going|coming|arriving|departing|leaving|staying|remaining|continuing|persisting|persevering|enduring|surviving|thriving|flourishing|prospering|succeeding)\b/g,
+            correct: false,
+            replacement: 'their',
+            explanation: '"Their" shows possession - it belongs to them'
+          }
+        ]
+      },
+      {
+        word: 'their',
+        patterns: [
+          { 
+            context: /\btheir\s+(is|are|was|were|will|would|should|could|might)\b/g,
+            correct: false,
+            replacement: 'there',
+            explanation: '"There" is correct when indicating existence'
+          }
+        ]
+      },
+      
+      // YOUR vs YOU'RE
+      {
+        word: 'your',
+        patterns: [
+          { 
+            context: /\byour\s+(welcome|right|wrong|correct|incorrect|awesome|amazing|great|wonderful|terrible|horrible|smart|intelligent|clever|funny|hilarious|beautiful|handsome|pretty|ugly|tall|short|fat|thin|old|young|happy|sad|angry|excited|nervous|scared|brave|confident|shy|outgoing|friendly|mean|nice|kind|generous|selfish|honest|dishonest|trustworthy|reliable|unreliable|responsible|irresponsible|mature|immature|serious|silly|funny|boring|interesting|creative|artistic|musical|athletic|strong|weak|healthy|sick|tired|energetic|lazy|hardworking|successful|unsuccessful|lucky|unlucky|popular|unpopular|famous|unknown|rich|poor|wealthy|broke|married|single|divorced|engaged|dating|available|taken|free|busy|occupied|employed|unemployed|retired|graduated|studying|working|playing|resting|sleeping|awake|alert|focused|distracted|confused|clear|certain|uncertain|sure|unsure|ready|unprepared|prepared|organized|disorganized|neat|messy|clean|dirty|new|old|fresh|stale|hot|cold|warm|cool|wet|dry|loud|quiet|fast|slow|early|late|on|off|in|out|up|down|here|there|everywhere|nowhere|somewhere|anywhere|always|never|sometimes|often|rarely|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|partly|completely|totally|entirely|fully|partially|slightly|barely|hardly|almost|nearly|quite|very|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously)\b/g,
+            correct: false,
+            replacement: "you're",
+            explanation: '"You\'re" is the contraction for "you are"'
+          }
+        ]
+      },
+      {
+        word: "you're",
+        patterns: [
+          { 
+            context: /\byou're\s+(car|house|book|dog|cat|family|parents|children|friends|job|work|school|college|university|home|room|desk|computer|phone|money|time|life|future|dreams|goals|plans|ideas|thoughts|feelings|emotions|experiences|memories|stories|problems|issues|challenges|opportunities|skills|talents|abilities|knowledge|education|name|age|birthday|address|number|email|password|username|account|profile|picture|photo|video|music|song|movie|show|game|sport|hobby|interest|favorite|preference|choice|decision|opinion|belief|value|principle|rule|law|policy|procedure|process|method|technique|strategy|plan|approach|solution|answer|question|problem|issue|challenge|opportunity|advantage|disadvantage|benefit|cost|price|value|worth|importance|significance|meaning|purpose|goal|objective|target|aim|intention|desire|wish|hope|dream|fantasy|imagination|creativity|innovation|invention|discovery|breakthrough|achievement|accomplishment|success|failure|mistake|error|fault|blame|responsibility|duty|obligation|commitment|promise|agreement|contract|deal|arrangement|appointment|meeting|date|event|occasion|celebration|party|gathering|reunion|conference|seminar|workshop|training|course|class|lesson|lecture|presentation|speech|talk|discussion|conversation|chat|interview|debate|argument|fight|conflict|dispute|disagreement|misunderstanding|confusion|clarity|understanding|knowledge|information|data|facts|truth|reality|fiction|story|tale|myth|legend|history|past|present|future|yesterday|today|tomorrow|morning|afternoon|evening|night|weekend|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|spring|summer|fall|autumn|winter|season|weather|climate|temperature|rain|snow|sun|moon|stars|sky|cloud|wind|storm|hurricane|tornado|earthquake|flood|fire|disaster|emergency|crisis|situation|condition|state|status|position|location|place|area|region|country|city|town|village|neighborhood|community|society|culture|tradition|custom|habit|routine|schedule|timetable|calendar|agenda|list|menu|recipe|ingredient|food|meal|breakfast|lunch|dinner|snack|drink|water|juice|coffee|tea|milk|soda|beer|wine|alcohol|drug|medicine|treatment|therapy|surgery|operation|procedure|examination|test|exam|quiz|assignment|homework|project|report|essay|paper|article|book|magazine|newspaper|journal|diary|blog|website|internet|computer|laptop|tablet|phone|smartphone|camera|television|radio|music|song|album|artist|band|singer|musician|actor|actress|director|producer|writer|author|poet|painter|artist|sculptor|photographer|designer|architect|engineer|doctor|nurse|teacher|professor|student|lawyer|judge|police|officer|firefighter|soldier|pilot|driver|mechanic|electrician|plumber|carpenter|builder|farmer|chef|cook|waiter|waitress|cashier|salesperson|manager|boss|employee|worker|colleague|partner|teammate|friend|buddy|pal|companion|acquaintance|stranger|neighbor|relative|family|parent|mother|father|sister|brother|daughter|son|grandmother|grandfather|aunt|uncle|cousin|niece|nephew|husband|wife|boyfriend|girlfriend|partner|spouse|lover|ex|former|current|future|potential|possible|impossible|likely|unlikely|probable|improbable|certain|uncertain|sure|unsure|confident|doubtful|hopeful|hopeless|optimistic|pessimistic|positive|negative|good|bad|right|wrong|correct|incorrect|true|false|real|fake|genuine|artificial|natural|synthetic|organic|inorganic|healthy|unhealthy|safe|dangerous|secure|insecure|stable|unstable|steady|unsteady|consistent|inconsistent|reliable|unreliable|dependable|undependable|trustworthy|untrustworthy|honest|dishonest|fair|unfair|just|unjust|equal|unequal|similar|different|same|opposite|alike|unlike|identical|unique|common|rare|usual|unusual|normal|abnormal|regular|irregular|standard|nonstandard|typical|atypical|average|exceptional|ordinary|extraordinary|simple|complex|easy|difficult|hard|soft|tough|gentle|rough|smooth|sharp|dull|bright|dark|light|heavy|clear|unclear|obvious|hidden|visible|invisible|apparent|secret|public|private|open|closed|free|expensive|cheap|costly|valuable|worthless|useful|useless|helpful|harmful|beneficial|detrimental|positive|negative|good|bad|excellent|terrible|perfect|imperfect|complete|incomplete|finished|unfinished|done|undone|ready|unready|prepared|unprepared|organized|disorganized|neat|messy|clean|dirty|fresh|stale|new|old|modern|ancient|current|outdated|updated|obsolete|recent|old|latest|earliest|first|last|beginning|end|start|finish|top|bottom|high|low|up|down|left|right|front|back|inside|outside|interior|exterior|internal|external|inner|outer|central|peripheral|main|secondary|primary|secondary|major|minor|big|small|large|tiny|huge|enormous|gigantic|massive|immense|vast|wide|narrow|broad|thin|thick|fat|skinny|tall|short|long|brief|quick|slow|fast|rapid|speedy|swift|sluggish|gradual|sudden|immediate|instant|delayed|late|early|on|off|active|inactive|busy|idle|occupied|free|available|unavailable|present|absent|here|there|everywhere|nowhere|somewhere|anywhere|always|never|sometimes|often|rarely|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|partly|completely|totally|entirely|fully|partially|slightly|barely|hardly|almost|nearly|quite|very|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably)\b/g,
+            correct: false,
+            replacement: 'your',
+            explanation: '"Your" shows possession - it belongs to you'
+          }
+        ]
+      },
+      
+      // ITS vs IT'S
+      {
+        word: "its",
+        patterns: [
+          { 
+            context: /\bits\s+(a|an|the|very|really|quite|so|too|such|pretty|rather|fairly|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|going|coming|moving|running|walking|flying|swimming|dancing|singing|cooking|eating|sleeping|working|playing|studying|learning|reading|writing|speaking|listening|thinking|feeling|looking|seeing|hearing|smelling|tasting|touching|holding|carrying|lifting|pushing|pulling|throwing|catching|hitting|kicking|jumping|climbing|falling|standing|sitting|lying|resting|relaxing|exercising|stretching|bending|turning|spinning|rotating|rolling|sliding|gliding|floating|sinking|rising|falling|growing|shrinking|expanding|contracting|opening|closing|starting|stopping|beginning|ending|continuing|pausing|waiting|hurrying|rushing|slowing|speeding|accelerating|decelerating|improving|worsening|increasing|decreasing|rising|falling|climbing|descending|advancing|retreating|approaching|departing|arriving|leaving|entering|exiting|joining|separating|connecting|disconnecting|attaching|detaching|building|destroying|creating|eliminating|adding|removing|including|excluding|accepting|rejecting|approving|disapproving|agreeing|disagreeing|supporting|opposing|helping|hindering|encouraging|discouraging|inspiring|discouraging|motivating|demotivating|exciting|boring|interesting|uninteresting|entertaining|unentertaining|amusing|annoying|pleasing|displeasing|satisfying|unsatisfying|fulfilling|unfulfilling|rewarding|unrewarding|beneficial|harmful|useful|useless|helpful|unhelpful|important|unimportant|significant|insignificant|meaningful|meaningless|valuable|worthless|precious|cheap|expensive|affordable|unaffordable|accessible|inaccessible|available|unavailable|possible|impossible|likely|unlikely|probable|improbable|certain|uncertain|sure|unsure|confident|doubtful|hopeful|hopeless|optimistic|pessimistic|positive|negative|good|bad|right|wrong|correct|incorrect|true|false|real|fake|genuine|artificial|natural|synthetic|organic|inorganic|healthy|unhealthy|safe|dangerous|secure|insecure|stable|unstable|steady|unsteady|consistent|inconsistent|reliable|unreliable|dependable|undependable|trustworthy|untrustworthy|honest|dishonest|fair|unfair|just|unjust|equal|unequal|similar|different|same|opposite|alike|unlike|identical|unique|common|rare|usual|unusual|normal|abnormal|regular|irregular|standard|nonstandard|typical|atypical|average|exceptional|ordinary|extraordinary|simple|complex|easy|difficult|hard|soft|tough|gentle|rough|smooth|sharp|dull|bright|dark|light|heavy|clear|unclear|obvious|hidden|visible|invisible|apparent|secret|public|private|open|closed|free|expensive|cheap|costly|valuable|worthless|useful|useless|helpful|harmful|beneficial|detrimental|positive|negative|good|bad|excellent|terrible|perfect|imperfect|complete|incomplete|finished|unfinished|done|undone|ready|unready|prepared|unprepared|organized|disorganized|neat|messy|clean|dirty|fresh|stale|new|old|modern|ancient|current|outdated|updated|obsolete|recent|old|latest|earliest|first|last|beginning|end|start|finish|top|bottom|high|low|up|down|left|right|front|back|inside|outside|interior|exterior|internal|external|inner|outer|central|peripheral|main|secondary|primary|secondary|major|minor|big|small|large|tiny|huge|enormous|gigantic|massive|immense|vast|wide|narrow|broad|thin|thick|fat|skinny|tall|short|long|brief|quick|slow|fast|rapid|speedy|swift|sluggish|gradual|sudden|immediate|instant|delayed|late|early|on|off|active|inactive|busy|idle|occupied|free|available|unavailable|present|absent|here|there|everywhere|nowhere|somewhere|anywhere|always|never|sometimes|often|rarely|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|partly|completely|totally|entirely|fully|partially|slightly|barely|hardly|almost|nearly|quite|very|extremely|incredibly|amazingly|surprisingly|unfortunately|fortunately|hopefully|probably|possibly|maybe|perhaps|definitely|certainly|surely|obviously|clearly|apparently|seemingly|supposedly|allegedly|reportedly|actually|really|truly|honestly|seriously|literally|figuratively|metaphorically|symbolically|ironically|surprisingly|shockingly|disappointingly|encouragingly|inspiringly|motivatingly|depressingly|frustratingly|annoyingly|irritatingly|amusingly|entertainingly|boringly|interestingly|fascinatingly|surprisingly|unexpectedly|predictably)\b/g,
+            correct: false,
+            replacement: "it's",
+            explanation: '"It\'s" is the contraction for "it is" or "it has"'
+          }
+        ]
+      }
+    ];
+
+    // Check each homophone rule
+    homophoneRules.forEach(rule => {
+      rule.patterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.context.exec(lowerText)) !== null) {
+          if (!pattern.correct) {
+            // Find the actual position in the original text
+            const matchStart = match.index;
+            const wordEnd = matchStart + rule.word.length;
+            
+            suggestions.push({
+              id: `context-homophone-${Date.now()}-${matchStart}`,
+              type: 'grammar',
+              severity: 'error',
+              message: `"${rule.word}" should be "${pattern.replacement}" in this context`,
+              originalText: text.substring(matchStart, wordEnd),
+              suggestedText: pattern.replacement || '',
+              startIndex: matchStart,
+              endIndex: wordEnd,
+              explanation: pattern.explanation,
+              confidence: 0.9
+            });
+          }
+        }
+      });
+    });
+
+    return suggestions;
+  }
+
+  /**
+   * Check subject-verb agreement errors
+   */
+  private checkSubjectVerbAgreement(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Common subject-verb disagreement patterns
+    const patterns = [
+      {
+        regex: /\b(he|she|it|[A-Z][a-z]+)\s+(are|were|have)\b/gi,
+        replacement: (match: string) => {
+          if (match.includes('are')) return match.replace('are', 'is');
+          if (match.includes('were')) return match.replace('were', 'was');
+          if (match.includes('have')) return match.replace('have', 'has');
+          return match;
+        },
+        explanation: 'Singular subjects require singular verbs'
+      },
+      {
+        regex: /\b(they|we|you|[a-z]+s)\s+(is|was|has)\b/gi,
+        replacement: (match: string) => {
+          if (match.includes('is')) return match.replace('is', 'are');
+          if (match.includes('was')) return match.replace('was', 'were');
+          if (match.includes('has')) return match.replace('has', 'have');
+          return match;
+        },
+        explanation: 'Plural subjects require plural verbs'
+      }
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.regex.exec(text)) !== null) {
+        const originalText = match[0];
+        const suggestedText = pattern.replacement(originalText);
+        
+        if (originalText !== suggestedText) {
+          suggestions.push({
+            id: `subject-verb-${Date.now()}-${match.index}`,
+            type: 'grammar',
+            severity: 'error',
+            message: 'Subject-verb disagreement',
+            originalText,
+            suggestedText,
+            startIndex: match.index,
+            endIndex: match.index + originalText.length,
+            explanation: pattern.explanation,
+            confidence: 0.85
+          });
+        }
+      }
+    });
+
+    return suggestions;
+  }
+
+  /**
+   * Check possessive vs plural errors
+   */
+  private checkPossessiveErrors(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Look for incorrect apostrophe usage
+    const patterns = [
+      {
+        regex: /\b([a-z]+)'s\s+(are|were|have|do|don't|can't|won't|will|would|should|could|might)\b/gi,
+        explanation: 'Use plural form, not possessive, when referring to multiple items',
+        getSuggestion: (match: string) => {
+          const word = match.split("'")[0];
+          return word + 's ' + match.split(' ')[1];
+        }
+      }
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.regex.exec(text)) !== null) {
+        const originalText = match[0];
+        const suggestedText = pattern.getSuggestion(originalText);
+        
+        suggestions.push({
+          id: `possessive-${Date.now()}-${match.index}`,
+          type: 'grammar',
+          severity: 'warning',
+          message: 'Incorrect apostrophe usage',
+          originalText,
+          suggestedText,
+          startIndex: match.index,
+          endIndex: match.index + originalText.length,
+          explanation: pattern.explanation,
+          confidence: 0.8
+        });
+      }
+    });
+
+    return suggestions;
+  }
+
+  /**
+   * Check article usage (a vs an)
+   */
+  private checkArticleUsage(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Check for "a" before vowel sounds and "an" before consonant sounds
+    const patterns = [
+      {
+        regex: /\ba\s+([aeiouAEIOU])/g,
+        replacement: 'an $1',
+        explanation: 'Use "an" before words that start with a vowel sound'
+      },
+      {
+        regex: /\ban\s+([bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ])/g,
+        replacement: 'a $1',
+        explanation: 'Use "a" before words that start with a consonant sound'
+      }
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.regex.exec(text)) !== null) {
+        const originalText = match[0];
+        const suggestedText = pattern.replacement;
+        
+        suggestions.push({
+          id: `article-${Date.now()}-${match.index}`,
+          type: 'grammar',
+          severity: 'error',
+          message: 'Incorrect article usage',
+          originalText,
+          suggestedText,
+          startIndex: match.index,
+          endIndex: match.index + originalText.length,
+          explanation: pattern.explanation,
+          confidence: 0.95
+        });
+      }
+    });
+
+    return suggestions;
+  }
+
+  /**
+   * Check common preposition errors
+   */
+  private checkPrepositionErrors(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Common preposition errors
+    const patterns = [
+      {
+        regex: /\bdifferent than\b/gi,
+        replacement: 'different from',
+        explanation: 'Use "different from" instead of "different than"'
+      },
+      {
+        regex: /\bcould care less\b/gi,
+        replacement: "couldn't care less",
+        explanation: 'Use "couldn\'t care less" to express complete indifference'
+      }
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.regex.exec(text)) !== null) {
+        const originalText = match[0];
+        const suggestedText = pattern.replacement;
+        
+        suggestions.push({
+          id: `preposition-${Date.now()}-${match.index}`,
+          type: 'grammar',
+          severity: 'suggestion',
+          message: 'Consider alternative preposition',
+          originalText,
+          suggestedText,
+          startIndex: match.index,
+          endIndex: match.index + originalText.length,
+          explanation: pattern.explanation,
+          confidence: 0.75
+        });
+      }
+    });
+
+    return suggestions;
+  }
+
+  /**
    * ⚡ INSTANT ANALYSIS: Immediate local checks (0ms delay)
    * Provides instant feedback for basic spelling, grammar, and style issues
    * Perfect for real-time typing feedback
@@ -171,6 +497,10 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
     
     const localSpellingSuggestions = await this.checkSpelling(text);
     suggestions.push(...localSpellingSuggestions);
+    
+    // 🎯 NEW: Context-based homophone and grammar checking
+    const contextBasedSuggestions = this.checkContextBasedErrors(text);
+    suggestions.push(...contextBasedSuggestions);
     
     const localStyleSuggestions = await this.checkStyle(text, words, sentences);
     suggestions.push(...localStyleSuggestions);
