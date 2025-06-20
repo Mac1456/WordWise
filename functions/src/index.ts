@@ -114,21 +114,90 @@ function cleanOpenAIResponse(response: string): string {
 }
 
 /**
- * Helper function to calculate text indices
- * @param {string} text Full text
- * @param {string} originalText Text to find
+ * Calculate start and end indices for a suggestion in the original text
+ * Improved version that handles multiple occurrences by finding the best match
+ * @param {string} text The original text
+ * @param {string} originalText The text to find
+ * @param {number} contextHint Optional hint about where to look (from AI analysis)
  * @return {object} Start and end indices
  */
 function calculateIndices(
   text: string,
   originalText: string,
+  contextHint?: number,
 ): { startIndex: number; endIndex: number } {
-  const startIndex = text.toLowerCase().indexOf(originalText.toLowerCase());
+  const searchText = text.toLowerCase();
+  const searchTerm = originalText.toLowerCase();
+  
+  // Find all occurrences of the text
+  const occurrences: number[] = [];
+  let index = searchText.indexOf(searchTerm);
+  
+  while (index !== -1) {
+    occurrences.push(index);
+    index = searchText.indexOf(searchTerm, index + 1);
+  }
+  
+  if (occurrences.length === 0) {
+    // Fallback: return position 0 if not found
+    console.warn(`Text "${originalText}" not found in original text`);
+    return {
+      startIndex: 0,
+      endIndex: originalText.length,
+    };
+  }
+  
+  // If only one occurrence, use it
+  if (occurrences.length === 1) {
+    return {
+      startIndex: occurrences[0],
+      endIndex: occurrences[0] + originalText.length,
+    };
+  }
+  
+  // Multiple occurrences: use context hint if provided, otherwise use first occurrence
+  let bestIndex = occurrences[0];
+  
+  if (contextHint !== undefined) {
+    // Find the occurrence closest to the context hint
+    let minDistance = Math.abs(occurrences[0] - contextHint);
+    
+    for (const occurrence of occurrences) {
+      const distance = Math.abs(occurrence - contextHint);
+      if (distance < minDistance) {
+        minDistance = distance;
+        bestIndex = occurrence;
+      }
+    }
+  }
+  
   return {
-    startIndex: startIndex >= 0 ? startIndex : 0,
-    endIndex: startIndex >= 0 ?
-      startIndex + originalText.length : originalText.length,
+    startIndex: bestIndex,
+    endIndex: bestIndex + originalText.length,
   };
+}
+
+/**
+ * Remove duplicate suggestions that have identical text ranges and suggestions
+ * This prevents the "mistakess" issue where multiple suggestions target the same text
+ */
+function deduplicateSuggestions(suggestions: any[]): any[] {
+  const seen = new Set<string>();
+  const unique: any[] = [];
+
+  for (const suggestion of suggestions) {
+    // Create a unique key based on text range and suggested replacement
+    const key = `${suggestion.startIndex}-${suggestion.endIndex}-${suggestion.originalText}-${suggestion.suggestedText}`;
+    
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(suggestion);
+    } else {
+      console.log(`Removing duplicate suggestion: "${suggestion.originalText}" → "${suggestion.suggestedText}"`);
+    }
+  }
+
+  return unique;
 }
 
 /**
@@ -218,6 +287,9 @@ export const analyzeGrammarAndClarity = onCall(
             ...indices,
           };
         });
+
+        // Remove duplicate suggestions to prevent conflicts
+        parsed.suggestions = deduplicateSuggestions(parsed.suggestions);
 
         console.log("Grammar analysis completed", {
           userId: request.auth?.uid,
@@ -408,5 +480,345 @@ export const getUserUsage = onCall(
         monthly: 1000,
       },
     };
+  },
+);
+
+/**
+ * Analyze text for conciseness and sentence structure optimization
+ * Secure Firebase Cloud Function that requires authentication
+ */
+export const analyzeConciseness = onCall(
+  async (request) => {
+    try {
+      const text = validateRequest(request);
+      const wordLimit = request.data.wordLimit || null;
+
+      // Initialize OpenAI client at runtime with the API key
+      const openai = new OpenAI({
+        apiKey: openaiApiKey,
+      });
+
+      let prompt = "You are an expert writing coach specializing in " +
+        "concise, impactful writing for college personal statements.\n\n" +
+        "Analyze the following text for conciseness and sentence structure. " +
+        "Focus on eliminating redundancy, simplifying complex sentences, " +
+        "and improving clarity while maintaining the author's voice.\n\n" +
+        `Text to analyze:\n"${text}"\n\n`;
+
+      if (wordLimit) {
+        prompt += `Word limit: ${wordLimit} words (current: ${text.split(/\s+/).length} words)\n\n`;
+      }
+
+      prompt += "Provide your analysis in this JSON format:\n" +
+        "{\n" +
+        "  \"suggestions\": [\n" +
+        "    {\n" +
+        "      \"type\": \"conciseness\",\n" +
+        "      \"severity\": \"warning|suggestion\",\n" +
+        "      \"message\": \"Brief description of the issue\",\n" +
+        "      \"originalText\": \"The wordy or complex text\",\n" +
+        "      \"suggestedText\": \"The more concise version\",\n" +
+        "      \"explanation\": \"Why this change improves the writing\",\n" +
+        "      \"wordsSaved\": 5,\n" +
+        "      \"confidence\": 0.9\n" +
+        "    }\n" +
+        "  ],\n" +
+        "  \"overallScore\": 75,\n" +
+        "  \"wordCount\": " + text.split(/\s+/).length + ",\n" +
+        "  \"insights\": [\n" +
+        "    \"Overall assessment of conciseness\",\n" +
+        "    \"Key areas for improvement\"\n" +
+        "  ]\n" +
+        "}\n\n" +
+        "Guidelines:\n" +
+        "- Focus on eliminating redundant phrases and words\n" +
+        "- Suggest simpler sentence structures\n" +
+        "- Maintain the author's authentic voice\n" +
+        "- Be specific about word savings\n" +
+        "- Only suggest changes that genuinely improve clarity";
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are a helpful writing coach focused on conciseness. " +
+              "Always respond with valid JSON matching the requested format.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 2000,
+      });
+
+      const result = completion.choices[0].message.content;
+      if (!result) {
+        throw new HttpsError("internal", "No response from OpenAI");
+      }
+
+      try {
+        const cleanedResult = cleanOpenAIResponse(result);
+        const parsed = JSON.parse(cleanedResult);
+
+        // Calculate actual start/end indices for suggestions
+        parsed.suggestions = parsed.suggestions.map((suggestion: any) => {
+          const indices = calculateIndices(text, suggestion.originalText);
+          return {
+            ...suggestion,
+            ...indices,
+          };
+        });
+
+        // Remove duplicate suggestions to prevent conflicts
+        parsed.suggestions = deduplicateSuggestions(parsed.suggestions);
+
+        console.log("Conciseness analysis completed", {
+          userId: request.auth?.uid,
+          textLength: text.length,
+          suggestionsCount: parsed.suggestions.length,
+        });
+
+        return parsed;
+      } catch (parseError) {
+        console.error("Failed to parse conciseness response", parseError);
+        throw new HttpsError("internal", "Invalid response format from AI service");
+      }
+    } catch (error) {
+      console.error("Conciseness analysis failed", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "Analysis failed. Please try again.");
+    }
+  },
+);
+
+/**
+ * Analyze text for vocabulary enhancement opportunities
+ * Secure Firebase Cloud Function that requires authentication
+ */
+export const analyzeVocabulary = onCall(
+  async (request) => {
+    try {
+      const text = validateRequest(request);
+
+      // Initialize OpenAI client at runtime with the API key
+      const openai = new OpenAI({
+        apiKey: openaiApiKey,
+      });
+
+      const prompt = "You are an expert writing coach helping high school " +
+        "students elevate their vocabulary for college personal statements.\n\n" +
+        "Analyze the following text for vocabulary enhancement opportunities. " +
+        "Suggest stronger, more impactful, college-level words while maintaining " +
+        "authenticity and avoiding overly complex language.\n\n" +
+        `Text to analyze:\n"${text}"\n\n` +
+        "Provide your analysis in this JSON format:\n" +
+        "{\n" +
+        "  \"suggestions\": [\n" +
+        "    {\n" +
+        "      \"type\": \"vocabulary\",\n" +
+        "      \"severity\": \"suggestion\",\n" +
+        "      \"message\": \"Consider a stronger word choice\",\n" +
+        "      \"originalText\": \"good\",\n" +
+        "      \"suggestedText\": \"exceptional\",\n" +
+        "      \"explanation\": \"More specific and impactful word choice\",\n" +
+        "      \"alternatives\": [\"remarkable\", \"outstanding\", \"impressive\"],\n" +
+        "      \"confidence\": 0.85\n" +
+        "    }\n" +
+        "  ],\n" +
+        "  \"overallScore\": 70,\n" +
+        "  \"insights\": [\n" +
+        "    \"Vocabulary strengths in the text\",\n" +
+        "    \"Areas for vocabulary enhancement\"\n" +
+        "  ]\n" +
+        "}\n\n" +
+        "Guidelines:\n" +
+        "- Focus on common/weak words that could be strengthened\n" +
+        "- Suggest college-appropriate but not overly complex alternatives\n" +
+        "- Provide 2-3 alternative word choices when possible\n" +
+        "- Maintain the student's authentic voice\n" +
+        "- Explain why the suggested word is better";
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are a vocabulary coach for college-bound students. " +
+              "Always respond with valid JSON matching the requested format.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 2000,
+      });
+
+      const result = completion.choices[0].message.content;
+      if (!result) {
+        throw new HttpsError("internal", "No response from OpenAI");
+      }
+
+      try {
+        const cleanedResult = cleanOpenAIResponse(result);
+        const parsed = JSON.parse(cleanedResult);
+
+        // Calculate actual start/end indices for suggestions
+        parsed.suggestions = parsed.suggestions.map((suggestion: any) => {
+          const indices = calculateIndices(text, suggestion.originalText);
+          return {
+            ...suggestion,
+            ...indices,
+          };
+        });
+
+        // Remove duplicate suggestions to prevent conflicts
+        parsed.suggestions = deduplicateSuggestions(parsed.suggestions);
+
+        console.log("Vocabulary analysis completed", {
+          userId: request.auth?.uid,
+          textLength: text.length,
+          suggestionsCount: parsed.suggestions.length,
+        });
+
+        return parsed;
+      } catch (parseError) {
+        console.error("Failed to parse vocabulary response", parseError);
+        throw new HttpsError("internal", "Invalid response format from AI service");
+      }
+    } catch (error) {
+      console.error("Vocabulary analysis failed", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "Analysis failed. Please try again.");
+    }
+  },
+);
+
+/**
+ * Analyze text for goal-based personalization and narrative alignment
+ * Secure Firebase Cloud Function that requires authentication
+ */
+export const analyzeGoalAlignment = onCall(
+  async (request) => {
+    try {
+      const text = validateRequest(request);
+      const writingGoal = request.data.writingGoal || "personal-statement";
+
+      // Initialize OpenAI client at runtime with the API key
+      const openai = new OpenAI({
+        apiKey: openaiApiKey,
+      });
+
+      const goalDescriptions: Record<string, string> = {
+        "leadership": "demonstrating leadership qualities, initiative, and ability to inspire others",
+        "resilience": "showing perseverance, overcoming challenges, and personal growth through adversity",
+        "service": "highlighting community service, helping others, and social responsibility",
+        "creativity": "showcasing creative thinking, innovation, and artistic expression",
+        "academic": "emphasizing intellectual curiosity, academic achievements, and scholarly pursuits",
+        "personal-growth": "focusing on self-discovery, maturity, and personal development",
+        "diversity": "celebrating unique background, perspectives, and contributions to diversity",
+        "career-goals": "connecting experiences to future career aspirations and professional goals"
+      };
+
+      const goalDescription = goalDescriptions[writingGoal] || "personal development and college readiness";
+
+      const prompt = "You are an expert college admissions consultant helping " +
+        "students align their personal statements with their narrative goals.\n\n" +
+        `The student's writing goal is: ${writingGoal}\n` +
+        `This means focusing on: ${goalDescription}\n\n` +
+        "Analyze the following text for alignment with this goal. Suggest " +
+        "specific improvements that would strengthen the narrative connection " +
+        "to the chosen theme while maintaining authenticity.\n\n" +
+        `Text to analyze:\n"${text}"\n\n` +
+        "Provide your analysis in this JSON format:\n" +
+        "{\n" +
+        "  \"suggestions\": [\n" +
+        "    {\n" +
+        "      \"type\": \"goal-alignment\",\n" +
+        "      \"severity\": \"suggestion\",\n" +
+        "      \"message\": \"Strengthen connection to " + writingGoal + " theme\",\n" +
+        "      \"originalText\": \"Text that could be enhanced\",\n" +
+        "      \"suggestedText\": \"Enhanced version with stronger goal alignment\",\n" +
+        "      \"explanation\": \"How this change better supports the " + writingGoal + " narrative\",\n" +
+        "      \"confidence\": 0.8\n" +
+        "    }\n" +
+        "  ],\n" +
+        "  \"alignmentScore\": 75,\n" +
+        "  \"goalAnalysis\": {\n" +
+        "    \"strengths\": [\"Current strong connections to the goal\"],\n" +
+        "    \"opportunities\": [\"Areas where goal alignment could be strengthened\"],\n" +
+        "    \"recommendations\": [\"Specific advice for better goal alignment\"]\n" +
+        "  },\n" +
+        "  \"insights\": [\n" +
+        "    \"Overall assessment of goal alignment\",\n" +
+        "    \"Key narrative opportunities\"\n" +
+        "  ]\n" +
+        "}\n\n" +
+        "Guidelines:\n" +
+        "- Focus on strengthening the connection to the chosen narrative goal\n" +
+        "- Suggest specific examples or details that would enhance the theme\n" +
+        "- Maintain the student's authentic voice and experiences\n" +
+        "- Provide actionable advice for better goal alignment\n" +
+        "- Be encouraging while identifying growth opportunities";
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are a college admissions consultant focused on narrative " +
+              "development. Always respond with valid JSON matching the requested format.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 2500,
+      });
+
+      const result = completion.choices[0].message.content;
+      if (!result) {
+        throw new HttpsError("internal", "No response from OpenAI");
+      }
+
+      try {
+        const cleanedResult = cleanOpenAIResponse(result);
+        const parsed = JSON.parse(cleanedResult);
+
+        // Calculate actual start/end indices for suggestions
+        parsed.suggestions = parsed.suggestions.map((suggestion: any) => {
+          const indices = calculateIndices(text, suggestion.originalText);
+          return {
+            ...suggestion,
+            ...indices,
+          };
+        });
+
+        // Remove duplicate suggestions to prevent conflicts
+        parsed.suggestions = deduplicateSuggestions(parsed.suggestions);
+
+        console.log("Goal alignment analysis completed", {
+          userId: request.auth?.uid,
+          textLength: text.length,
+          writingGoal,
+          alignmentScore: parsed.alignmentScore,
+        });
+
+        return parsed;
+      } catch (parseError) {
+        console.error("Failed to parse goal alignment response", parseError);
+        throw new HttpsError("internal", "Invalid response format from AI service");
+      }
+    } catch (error) {
+      console.error("Goal alignment analysis failed", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "Analysis failed. Please try again.");
+    }
   },
 );

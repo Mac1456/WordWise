@@ -34,8 +34,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const [wordLimit, setWordLimit] = useState<number | null>(null)
   const [showToneAnalysis, setShowToneAnalysis] = useState(false)
   const [isRunningToneAnalysis, setIsRunningToneAnalysis] = useState(false)
-  // Remove unused state - keeping for potential future use
-  // const [forceAIAnalysis, setForceAIAnalysis] = useState(false)
+  const [analysisMode, setAnalysisMode] = useState<'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment'>('comprehensive')
+  const [writingGoal, setWritingGoal] = useState<string>('personal-statement')
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -78,8 +78,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       if (content.trim().length > 10) {
         setIsAnalyzing(true)
         try {
-          const writingGoal = 'personal-statement' // Default for now
-          const result = await textAnalysisService.analyzeText(content, writingGoal)
+          const result = await textAnalysisService.analyzeText(content, writingGoal, false, analysisMode, wordLimit || undefined)
           setAnalysis(result)
         } catch (error) {
           console.error('Text analysis failed:', error)
@@ -167,8 +166,72 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       content.substring(0, suggestion.startIndex) + 
       suggestion.suggestedText + 
       content.substring(suggestion.endIndex)
-    handleContentChange(newContent)
+    
+    // Calculate the length difference to adjust other suggestion indices
+    const lengthDifference = suggestion.suggestedText.length - (suggestion.endIndex - suggestion.startIndex)
+    
+    // Remove any overlapping or conflicting suggestions immediately
+    if (analysis) {
+      const filteredSuggestions = analysis.suggestions.filter(s => {
+        // Keep the current suggestion being applied (will be removed by re-analysis anyway)
+        if (s.id === suggestion.id) return false
+        
+        // Remove suggestions that overlap with the applied change
+        const overlaps = !(s.endIndex <= suggestion.startIndex || s.startIndex >= suggestion.endIndex)
+        if (overlaps) {
+          console.log('Removing overlapping suggestion:', s.originalText, '→', s.suggestedText)
+          return false
+        }
+        
+        return true
+      }).map(s => {
+        // Adjust indices for suggestions that come after the applied change
+        if (s.startIndex > suggestion.endIndex) {
+          return {
+            ...s,
+            startIndex: s.startIndex + lengthDifference,
+            endIndex: s.endIndex + lengthDifference
+          }
+        }
+        return s
+      })
+      
+      // Update analysis with filtered suggestions
+      setAnalysis({
+        ...analysis,
+        suggestions: filteredSuggestions
+      })
+    }
+    
+    // Apply the change and trigger immediate re-analysis
+    setContent(newContent)
     setSelectedSuggestion(null)
+    
+    // Clear existing timeout
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout)
+    }
+    
+    // Set new timeout for auto-save
+    const timeout = setTimeout(() => {
+      autoSave(newContent)
+    }, 2000)
+    setAutoSaveTimeout(timeout)
+    
+    // Immediately re-analyze to update suggestions
+    setTimeout(async () => {
+      if (newContent.trim().length > 10) {
+        setIsAnalyzing(true)
+        try {
+          const result = await textAnalysisService.analyzeText(newContent, writingGoal, false, analysisMode, wordLimit || undefined)
+          setAnalysis(result)
+        } catch (error) {
+          console.error('Re-analysis after suggestion application failed:', error)
+        } finally {
+          setIsAnalyzing(false)
+        }
+      }
+    }, 100) // Small delay to ensure state updates
     
     // Track suggestion acceptance for learning
     console.log('Suggestion applied:', {
@@ -222,18 +285,18 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     }
   }
 
-  const handleManualAIAnalysis = async () => {
+  const runAIAnalysis = async (specificMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment') => {
     if (!content.trim() || content.trim().length < 20) {
       alert('Please write at least 20 characters for AI analysis.')
       return
     }
 
     setIsAnalyzing(true)
+    const targetMode = specificMode || analysisMode
     try {
-      const writingGoal = 'personal-statement'
-      const result = await textAnalysisService.analyzeText(content, writingGoal, false)
+      const result = await textAnalysisService.analyzeText(content, writingGoal, false, targetMode, wordLimit || undefined)
       setAnalysis(result)
-      console.log('Manual AI analysis completed')
+      console.log(`Manual AI analysis completed (${targetMode})`)
     } catch (error) {
       console.error('Manual AI analysis failed:', error)
       alert('AI analysis failed. Please check your OpenAI API key and try again.')
@@ -241,6 +304,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       setIsAnalyzing(false)
     }
   }
+
+  const handleManualAIAnalysis = () => runAIAnalysis()
 
   if (!currentDocument) {
     return (
@@ -383,44 +448,93 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
               </div>
             </div>
 
-            {/* Word limit setting */}
-            <div className="p-4 border-b border-gray-200 bg-gray-50">
-              <div className="flex items-center space-x-4">
-                <label className="text-sm font-medium text-gray-700">
-                  Word Limit:
-                  <input
-                    type="number"
-                    value={wordLimit || ''}
-                    onChange={handleWordLimitChange}
-                    placeholder="e.g., 500"
-                    className="ml-2 w-24 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </label>
-                {wordLimit && (
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-gray-600">
-                        {wordCount} / {wordLimit} words
-                      </span>
-                      <span className={`text-sm font-medium ${isOverLimit ? 'text-red-600' : 'text-green-600'}`}>
-                        {Math.round(limitProgress)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full transition-all duration-300 ${
-                          isOverLimit ? 'bg-red-500' : 'bg-green-500'
-                        }`}
-                        style={{ width: `${Math.min(limitProgress, 100)}%` }}
-                      ></div>
-                    </div>
-                    {isOverLimit && (
-                      <p className="text-xs text-red-600 mt-1">
-                        Exceeds limit by {wordCount - wordLimit} words
-                      </p>
-                    )}
-                  </div>
-                )}
+            {/* Simplified Controls */}
+            <div className="p-3 border-b border-gray-200 bg-gray-50">
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Word Limit */}
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm text-gray-700">
+                    Limit:
+                    <input
+                      type="number"
+                      value={wordLimit || ''}
+                      onChange={handleWordLimitChange}
+                      placeholder="500"
+                      className="ml-1 w-16 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </label>
+                  {wordLimit && (
+                    <span className={`text-sm ${isOverLimit ? 'text-red-600' : 'text-green-600'}`}>
+                      {wordCount}/{wordLimit}
+                    </span>
+                  )}
+                </div>
+
+                {/* Writing Goal */}
+                <select
+                  value={writingGoal}
+                  onChange={(e) => setWritingGoal(e.target.value)}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="personal-statement">Personal Statement</option>
+                  <option value="leadership">Leadership</option>
+                  <option value="resilience">Resilience</option>
+                  <option value="service">Community Service</option>
+                  <option value="creativity">Creativity</option>
+                  <option value="academic">Academic</option>
+                  <option value="personal-growth">Personal Growth</option>
+                  <option value="diversity">Diversity</option>
+                  <option value="career-goals">Career Goals</option>
+                </select>
+
+                {/* Analysis Mode */}
+                <select
+                  value={analysisMode}
+                  onChange={(e) => setAnalysisMode(e.target.value as any)}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="comprehensive">All Features</option>
+                  <option value="grammar-only">Grammar Only</option>
+                  <option value="conciseness">Conciseness</option>
+                  <option value="vocabulary">Vocabulary</option>
+                  <option value="goal-alignment">Goal Alignment</option>
+                </select>
+
+                {/* Quick Actions */}
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => runAIAnalysis('grammar-only')}
+                    disabled={isAnalyzing || content.trim().length < 20}
+                    className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
+                    title="Grammar Check"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    onClick={() => runAIAnalysis('conciseness')}
+                    disabled={isAnalyzing || content.trim().length < 50}
+                    className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+                    title="Make Concise"
+                  >
+                    📝
+                  </button>
+                  <button
+                    onClick={() => runAIAnalysis('vocabulary')}
+                    disabled={isAnalyzing || content.trim().length < 50}
+                    className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
+                    title="Enhance Vocabulary"
+                  >
+                    📚
+                  </button>
+                  <button
+                    onClick={() => runAIAnalysis('goal-alignment')}
+                    disabled={isAnalyzing || content.trim().length < 100}
+                    className="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 disabled:opacity-50"
+                    title="Goal Alignment"
+                  >
+                    🎯
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -507,8 +621,15 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
         {/* Suggestions Sidebar */}
         <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sticky top-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Writing Assistant</h3>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sticky top-6 max-h-screen overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Suggestions</h3>
+              {analysis?.suggestions.length ? (
+                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                  {analysis.suggestions.length}
+                </span>
+              ) : null}
+            </div>
             
             {!analysis?.suggestions.length ? (
               <div className="text-center py-8">
@@ -519,303 +640,99 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {/* Grammar Issues */}
-                {suggestionsByType.grammar?.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                      <AlertCircle className="h-4 w-4 text-red-500 mr-1" />
-                      Grammar ({suggestionsByType.grammar.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {suggestionsByType.grammar.slice(0, 5).map((suggestion) => (
-                        <div
-                          key={suggestion.id}
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                          onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start space-x-2">
-                              {getSeverityIcon(suggestion.severity)}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {suggestion.message}
-                                </p>
-                                <p className="text-xs text-gray-600 mt-1 truncate">
-                                  "{suggestion.originalText.substring(0, 40)}..."
-                                </p>
-                              </div>
-                            </div>
+              <div className="space-y-3">
+                {/* All Suggestions - Simplified */}
+                {analysis.suggestions.slice(0, 10).map((suggestion) => (
+                  <div
+                    key={suggestion.id}
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
+                    onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start space-x-2 flex-1 min-w-0">
+                        {getSeverityIcon(suggestion.severity)}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              suggestion.type === 'grammar' ? 'bg-red-100 text-red-700' :
+                              suggestion.type === 'vocabulary' ? 'bg-purple-100 text-purple-700' :
+                              suggestion.type === 'conciseness' ? 'bg-blue-100 text-blue-700' :
+                              suggestion.type === 'goal-alignment' ? 'bg-green-100 text-green-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {suggestion.type.replace('-', ' ')}
+                            </span>
+                            {suggestion.wordsSaved && (
+                              <span className="text-xs text-green-600">-{suggestion.wordsSaved}w</span>
+                            )}
                           </div>
-                          
-                          {selectedSuggestion?.id === suggestion.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">{suggestion.explanation}</p>
-                              <div className="flex space-x-2">
-                                {suggestion.suggestedText !== suggestion.originalText && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      applySuggestion(suggestion)
-                                    }}
-                                    className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
-                                  >
-                                    Apply
-                                  </button>
-                                )}
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {suggestion.message}
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1 truncate">
+                            "{suggestion.originalText.substring(0, 30)}..."
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {selectedSuggestion?.id === suggestion.id && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <p className="text-xs text-gray-600 mb-3 break-words">{suggestion.explanation}</p>
+                        {suggestion.originalText !== suggestion.suggestedText && (
+                          <div className="mb-3 p-2 bg-gray-50 rounded text-xs">
+                            <div className="text-gray-500 mb-1">Suggested:</div>
+                            <div className="text-gray-900 break-words">{suggestion.suggestedText}</div>
+                          </div>
+                        )}
+                        {suggestion.alternatives && (
+                          <div className="mb-3">
+                            <div className="text-xs text-gray-500 mb-1">Alternatives:</div>
+                            <div className="flex flex-wrap gap-1">
+                              {suggestion.alternatives.slice(0, 3).map((alt, index) => (
                                 <button
+                                  key={index}
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    dismissSuggestion(suggestion.id)
+                                    const newSuggestion = { ...suggestion, suggestedText: alt }
+                                    applySuggestion(newSuggestion)
                                   }}
-                                  className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                                  className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
                                 >
-                                  Dismiss
+                                  {alt}
                                 </button>
-                              </div>
+                              ))}
                             </div>
+                          </div>
+                        )}
+                        <div className="flex space-x-2">
+                          {suggestion.originalText !== suggestion.suggestedText && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                applySuggestion(suggestion)
+                              }}
+                              className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700"
+                            >
+                              Apply
+                            </button>
                           )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              dismissSuggestion(suggestion.id)
+                            }}
+                            className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                          >
+                            Dismiss
+                          </button>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
 
-                {/* Spelling Issues */}
-                {suggestionsByType.spelling?.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                      <AlertCircle className="h-4 w-4 text-red-500 mr-1" />
-                      Spelling ({suggestionsByType.spelling.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {suggestionsByType.spelling.slice(0, 5).map((suggestion) => (
-                        <div
-                          key={suggestion.id}
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                          onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start space-x-2">
-                              {getSeverityIcon(suggestion.severity)}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900">
-                                  {suggestion.message}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {selectedSuggestion?.id === suggestion.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">{suggestion.explanation}</p>
-                              <div className="flex space-x-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    applySuggestion(suggestion)
-                                  }}
-                                  className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
-                                >
-                                  Apply "{suggestion.suggestedText}"
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    dismissSuggestion(suggestion.id)
-                                  }}
-                                  className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
-                {/* Style Suggestions */}
-                {suggestionsByType.style?.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                      <Lightbulb className="h-4 w-4 text-blue-500 mr-1" />
-                      Style ({suggestionsByType.style.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {suggestionsByType.style.slice(0, 3).map((suggestion) => (
-                        <div
-                          key={suggestion.id}
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                          onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start space-x-2">
-                              {getSeverityIcon(suggestion.severity)}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {suggestion.message}
-                                </p>
-                                <p className="text-xs text-gray-600 mt-1 truncate">
-                                  "{suggestion.originalText.substring(0, 30)}..."
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {selectedSuggestion?.id === suggestion.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">{suggestion.explanation}</p>
-                              <div className="flex space-x-2">
-                                {suggestion.suggestedText !== suggestion.originalText && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      applySuggestion(suggestion)
-                                    }}
-                                    className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
-                                  >
-                                    Apply
-                                  </button>
-                                )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    dismissSuggestion(suggestion.id)
-                                  }}
-                                  className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Vocabulary Suggestions */}
-                {suggestionsByType.vocabulary?.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                      <svg className="h-4 w-4 text-purple-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                      Vocabulary ({suggestionsByType.vocabulary.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {suggestionsByType.vocabulary.slice(0, 3).map((suggestion) => (
-                        <div
-                          key={suggestion.id}
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                          onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start space-x-2">
-                              {getSeverityIcon(suggestion.severity)}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {suggestion.message}
-                                </p>
-                                <p className="text-xs text-gray-600 mt-1">
-                                  "{suggestion.originalText}"
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {selectedSuggestion?.id === suggestion.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">{suggestion.explanation}</p>
-                              {suggestion.alternatives && (
-                                <div className="mb-2">
-                                  <p className="text-xs font-medium text-gray-700 mb-1">Alternatives:</p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {suggestion.alternatives.map((alt, index) => (
-                                      <button
-                                        key={index}
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          const newSuggestion = { ...suggestion, suggestedText: alt }
-                                          applySuggestion(newSuggestion)
-                                        }}
-                                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
-                                      >
-                                        {alt}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="flex space-x-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    dismissSuggestion(suggestion.id)
-                                  }}
-                                  className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Goal-Aligned Suggestions */}
-                {suggestionsByType['goal-alignment']?.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                      <Target className="h-4 w-4 text-green-500 mr-1" />
-                      Goal-Aligned ({suggestionsByType['goal-alignment'].length})
-                    </h4>
-                    <div className="space-y-2">
-                      {suggestionsByType['goal-alignment'].slice(0, 3).map((suggestion) => (
-                        <div
-                          key={suggestion.id}
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${getSeverityColor(suggestion.severity)}`}
-                          onClick={() => setSelectedSuggestion(suggestion.id === selectedSuggestion?.id ? null : suggestion)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start space-x-2">
-                              {getSeverityIcon(suggestion.severity)}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900">
-                                  {suggestion.message}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {selectedSuggestion?.id === suggestion.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">{suggestion.explanation}</p>
-                              <div className="flex space-x-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    dismissSuggestion(suggestion.id)
-                                  }}
-                                  className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                                >
-                                  Got it
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>

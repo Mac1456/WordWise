@@ -36,15 +36,38 @@ export default function HighlightedTextArea({
       return value.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
     }
 
-    // Sort suggestions by start index
-    const sortedSuggestions = [...suggestions].sort((a, b) => a.startIndex - b.startIndex);
+    // Filter out suggestions with invalid indices or empty text
+    const validSuggestions = suggestions.filter(suggestion => {
+      const suggestionText = value.slice(suggestion.startIndex, suggestion.endIndex);
+      return (
+        suggestion.startIndex >= 0 &&
+        suggestion.endIndex <= value.length &&
+        suggestion.startIndex < suggestion.endIndex &&
+        suggestionText.trim().length > 0 // Don't highlight empty or whitespace-only text
+      );
+    });
+
+    if (!validSuggestions.length) {
+      return value.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+    }
+
+    // Sort suggestions by start index and remove overlaps
+    const sortedSuggestions = [...validSuggestions]
+      .sort((a, b) => a.startIndex - b.startIndex)
+      .filter((suggestion, index, arr) => {
+        // Remove overlapping suggestions (keep the first one)
+        if (index === 0) return true;
+        const prev = arr[index - 1];
+        return suggestion.startIndex >= prev.endIndex;
+      });
     
     let result = '';
     let lastIndex = 0;
 
     sortedSuggestions.forEach((suggestion) => {
       // Add text before suggestion
-      result += value.slice(lastIndex, suggestion.startIndex).replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+      const beforeText = value.slice(lastIndex, suggestion.startIndex);
+      result += beforeText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
       
       // Add highlighted suggestion
       const suggestionText = value.slice(suggestion.startIndex, suggestion.endIndex);
@@ -54,16 +77,17 @@ export default function HighlightedTextArea({
         'bg-blue-100 border-b-2 border-blue-400';
       
       result += `<span 
-        class="${severityClass} cursor-pointer relative inline-block"
+        class="${severityClass} cursor-pointer relative inline-block rounded px-0.5"
         data-suggestion-id="${suggestion.id}"
-        title="${suggestion.message}"
+        title="${suggestion.message.replace(/"/g, '&quot;')}"
       >${suggestionText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')}</span>`;
       
       lastIndex = suggestion.endIndex;
     });
 
     // Add remaining text
-    result += value.slice(lastIndex).replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+    const remainingText = value.slice(lastIndex);
+    result += remainingText.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
     
     return result;
   };

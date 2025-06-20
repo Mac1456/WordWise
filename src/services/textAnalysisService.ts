@@ -5,7 +5,7 @@ import { firebaseAIService } from './firebaseAIService';
 
 export interface TextSuggestion {
   id: string;
-  type: 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment';
+  type: 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment' | 'conciseness';
   severity: 'error' | 'warning' | 'suggestion';
   message: string;
   originalText: string;
@@ -14,6 +14,7 @@ export interface TextSuggestion {
   endIndex: number;
   explanation: string;
   alternatives?: string[]; // For vocabulary suggestions
+  wordsSaved?: number; // For conciseness suggestions
 }
 
 export interface ToneAnalysis {
@@ -59,7 +60,7 @@ class TextAnalysisService {
     }
   }
 
-  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean): Promise<TextAnalysis> {
+  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean, analysisMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment', wordLimit?: number): Promise<TextAnalysis> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -74,28 +75,108 @@ class TextAnalysisService {
     const characterCount = text.length;
     const averageWordsPerSentence = sentenceCount > 0 ? wordCount / sentenceCount : 0;
 
+    // Determine which analyses to run based on mode
+    const mode = analysisMode || 'comprehensive';
+    
     // Try Firebase AI analysis first, fall back to rule-based if it fails
     try {
       if (text.trim().length > 20) {
-        console.log('Attempting Firebase AI analysis...');
-        const aiAnalysis = await firebaseAIService.analyzeGrammarAndClarity(text);
+        console.log(`Attempting Firebase AI analysis (mode: ${mode})...`);
         
-        // Convert AI suggestions to TextSuggestion format
-        const aiSuggestions = aiAnalysis.suggestions.map((suggestion: any) => ({
-          id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
-          severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-          message: suggestion.message,
-          originalText: suggestion.originalText,
-          suggestedText: suggestion.suggestedText,
-          startIndex: suggestion.startIndex,
-          endIndex: suggestion.endIndex,
-          explanation: suggestion.explanation,
-          alternatives: undefined
-        }));
+        // Layer 1: Grammar & Clarity (Foundation)
+        if (mode === 'comprehensive' || mode === 'grammar-only') {
+          const aiAnalysis = await firebaseAIService.analyzeGrammarAndClarity(text);
+          
+          const aiSuggestions = aiAnalysis.suggestions.map((suggestion: any) => ({
+            id: `ai-grammar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
+            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
+            message: suggestion.message,
+            originalText: suggestion.originalText,
+            suggestedText: suggestion.suggestedText,
+            startIndex: suggestion.startIndex,
+            endIndex: suggestion.endIndex,
+            explanation: suggestion.explanation,
+            alternatives: undefined
+          }));
+          
+          suggestions.push(...aiSuggestions);
+          console.log(`Added ${aiSuggestions.length} grammar/clarity suggestions`);
+        }
         
-        suggestions.push(...aiSuggestions);
-        console.log(`Added ${aiSuggestions.length} AI suggestions`);
+        // Layer 3: Conciseness & Sentence Structure
+        if (mode === 'comprehensive' || mode === 'conciseness') {
+          try {
+            const concisenessAnalysis = await firebaseAIService.analyzeConciseness(text, wordLimit);
+            
+            const concisenessSuggestions = concisenessAnalysis.suggestions.map((suggestion: any) => ({
+              id: `ai-conciseness-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'conciseness' as const,
+              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
+              message: suggestion.message,
+              originalText: suggestion.originalText,
+              suggestedText: suggestion.suggestedText,
+              startIndex: suggestion.startIndex,
+              endIndex: suggestion.endIndex,
+              explanation: suggestion.explanation,
+              wordsSaved: suggestion.wordsSaved
+            }));
+            
+            suggestions.push(...concisenessSuggestions);
+            console.log(`Added ${concisenessSuggestions.length} conciseness suggestions`);
+          } catch (error) {
+            console.warn('Conciseness analysis failed:', error);
+          }
+        }
+        
+        // Layer 4: Vocabulary Enhancement
+        if (mode === 'comprehensive' || mode === 'vocabulary') {
+          try {
+            const vocabularyAnalysis = await firebaseAIService.analyzeVocabulary(text);
+            
+            const vocabularySuggestions = vocabularyAnalysis.suggestions.map((suggestion: any) => ({
+              id: `ai-vocabulary-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'vocabulary' as const,
+              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
+              message: suggestion.message,
+              originalText: suggestion.originalText,
+              suggestedText: suggestion.suggestedText,
+              startIndex: suggestion.startIndex,
+              endIndex: suggestion.endIndex,
+              explanation: suggestion.explanation,
+              alternatives: suggestion.alternatives
+            }));
+            
+            suggestions.push(...vocabularySuggestions);
+            console.log(`Added ${vocabularySuggestions.length} vocabulary suggestions`);
+          } catch (error) {
+            console.warn('Vocabulary analysis failed:', error);
+          }
+        }
+        
+        // Layer 6: Goal-Based Personalization
+        if ((mode === 'comprehensive' || mode === 'goal-alignment') && writingGoal) {
+          try {
+            const goalAnalysis = await firebaseAIService.analyzeGoalAlignment(text, writingGoal);
+            
+            const goalSuggestions = goalAnalysis.suggestions.map((suggestion: any) => ({
+              id: `ai-goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'goal-alignment' as const,
+              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
+              message: suggestion.message,
+              originalText: suggestion.originalText,
+              suggestedText: suggestion.suggestedText,
+              startIndex: suggestion.startIndex,
+              endIndex: suggestion.endIndex,
+              explanation: suggestion.explanation
+            }));
+            
+            suggestions.push(...goalSuggestions);
+            console.log(`Added ${goalSuggestions.length} goal-alignment suggestions`);
+          } catch (error) {
+            console.warn('Goal alignment analysis failed:', error);
+          }
+        }
       }
     } catch (error) {
       console.warn('OpenAI analysis failed, falling back to rule-based analysis:', error);
@@ -119,6 +200,13 @@ class TextAnalysisService {
     if (writingGoal) {
       const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
       suggestions.push(...goalSuggestions);
+    }
+
+    // Resolve conflicts between overlapping suggestions
+    const resolvedSuggestions = this.resolveConflictingSuggestions(suggestions);
+    
+    if (resolvedSuggestions.length !== suggestions.length) {
+      console.log(`Conflict resolution: ${suggestions.length} → ${resolvedSuggestions.length} suggestions`);
     }
 
     // Readability analysis
@@ -145,7 +233,7 @@ class TextAnalysisService {
     }
 
     return {
-      suggestions,
+      suggestions: resolvedSuggestions,
       readabilityScore: readability.score,
       readabilityGrade: readability.grade,
       wordCount,
@@ -468,6 +556,114 @@ class TextAnalysisService {
       engagement,
       recommendations,
     };
+  }
+
+  private removeDuplicateSuggestions(suggestions: TextSuggestion[]): TextSuggestion[] {
+    const seen = new Set<string>();
+    const unique: TextSuggestion[] = [];
+  
+    for (const suggestion of suggestions) {
+      // Create a unique key based on text range and suggested replacement
+      const key = `${suggestion.startIndex}-${suggestion.endIndex}-${suggestion.originalText}-${suggestion.suggestedText}`;
+      
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(suggestion);
+      } else {
+        console.log(`Removing duplicate suggestion: "${suggestion.originalText}" → "${suggestion.suggestedText}"`);
+      }
+    }
+  
+    return unique;
+  }
+
+  private resolveConflictingSuggestions(suggestions: TextSuggestion[]): TextSuggestion[] {
+    if (suggestions.length <= 1) return suggestions;
+
+    // First, remove exact duplicates (same text range and same suggested text)
+    const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
+    
+    if (deduplicatedSuggestions.length <= 1) return deduplicatedSuggestions;
+
+    // Sort suggestions by start index to process them in order
+    const sortedSuggestions = [...deduplicatedSuggestions].sort((a, b) => a.startIndex - b.startIndex);
+    const resolvedSuggestions: TextSuggestion[] = [];
+
+    for (const currentSuggestion of sortedSuggestions) {
+      let hasConflict = false;
+
+      // Check if this suggestion overlaps with any already resolved suggestion
+      for (const resolvedSuggestion of resolvedSuggestions) {
+        if (this.suggestionsOverlap(currentSuggestion, resolvedSuggestion)) {
+          // Determine which suggestion to keep based on priority
+          const keepCurrent = this.shouldKeepCurrentSuggestion(currentSuggestion, resolvedSuggestion);
+          
+          console.log(`Conflict detected: "${currentSuggestion.originalText}" (${currentSuggestion.type}) vs "${resolvedSuggestion.originalText}" (${resolvedSuggestion.type}), keeping: ${keepCurrent ? 'current' : 'existing'}`);
+          
+          if (keepCurrent) {
+            // Remove the conflicting resolved suggestion and add current one
+            const index = resolvedSuggestions.indexOf(resolvedSuggestion);
+            resolvedSuggestions.splice(index, 1);
+            resolvedSuggestions.push(currentSuggestion);
+          }
+          
+          hasConflict = true;
+          break;
+        }
+      }
+
+      // If no conflict, add the suggestion
+      if (!hasConflict) {
+        resolvedSuggestions.push(currentSuggestion);
+      }
+    }
+
+    // Sort by start index again for consistent ordering
+    return resolvedSuggestions.sort((a, b) => a.startIndex - b.startIndex);
+  }
+
+  private suggestionsOverlap(suggestion1: TextSuggestion, suggestion2: TextSuggestion): boolean {
+    // Check if the text ranges overlap
+    return !(suggestion1.endIndex <= suggestion2.startIndex || suggestion2.endIndex <= suggestion1.startIndex);
+  }
+
+  private shouldKeepCurrentSuggestion(current: TextSuggestion, existing: TextSuggestion): boolean {
+    // Priority order (higher number = higher priority):
+    // 1. spelling errors (most specific)
+    // 2. grammar errors  
+    // 3. style suggestions
+    // 4. vocabulary suggestions
+    // 5. conciseness suggestions
+    // 6. goal-alignment suggestions (most general)
+    
+    const getPriority = (suggestion: TextSuggestion): number => {
+      switch (suggestion.type) {
+        case 'spelling': return 6;
+        case 'grammar': return 5;
+        case 'style': return 4;
+        case 'vocabulary': return 3;
+        case 'conciseness': return 2;
+        case 'goal-alignment': return 1;
+        default: return 0;
+      }
+    };
+
+    const currentPriority = getPriority(current);
+    const existingPriority = getPriority(existing);
+
+    // If priorities are different, keep the higher priority suggestion
+    if (currentPriority !== existingPriority) {
+      return currentPriority > existingPriority;
+    }
+
+    // If same priority, prefer error severity over warning/suggestion
+    if (current.severity !== existing.severity) {
+      const severityOrder = { 'error': 3, 'warning': 2, 'suggestion': 1 };
+      return severityOrder[current.severity] > severityOrder[existing.severity];
+    }
+
+    // If same type and severity, keep the first one (existing)
+    return false;
   }
 }
 

@@ -48,6 +48,62 @@ interface UsageResult {
   };
 }
 
+interface ConcisenessAnalysisResult {
+  suggestions: Array<{
+    type: 'conciseness';
+    severity: 'warning' | 'suggestion';
+    message: string;
+    originalText: string;
+    suggestedText: string;
+    explanation: string;
+    wordsSaved: number;
+    startIndex: number;
+    endIndex: number;
+    confidence: number;
+  }>;
+  overallScore: number;
+  wordCount: number;
+  insights: string[];
+}
+
+interface VocabularyAnalysisResult {
+  suggestions: Array<{
+    type: 'vocabulary';
+    severity: 'suggestion';
+    message: string;
+    originalText: string;
+    suggestedText: string;
+    explanation: string;
+    alternatives: string[];
+    startIndex: number;
+    endIndex: number;
+    confidence: number;
+  }>;
+  overallScore: number;
+  insights: string[];
+}
+
+interface GoalAlignmentResult {
+  suggestions: Array<{
+    type: 'goal-alignment';
+    severity: 'suggestion';
+    message: string;
+    originalText: string;
+    suggestedText: string;
+    explanation: string;
+    startIndex: number;
+    endIndex: number;
+    confidence: number;
+  }>;
+  alignmentScore: number;
+  goalAnalysis: {
+    strengths: string[];
+    opportunities: string[];
+    recommendations: string[];
+  };
+  insights: string[];
+}
+
 /**
  * Secure Firebase AI Service
  * All API calls go through authenticated Firebase Cloud Functions
@@ -72,6 +128,21 @@ export class FirebaseAIService {
   private usageFunction = httpsCallable<{}, UsageResult>(
     functions,
     'getUserUsage'
+  );
+  
+  private concisenessFunction = httpsCallable<{ text: string; wordLimit?: number }, ConcisenessAnalysisResult>(
+    functions,
+    'analyzeConciseness'
+  );
+  
+  private vocabularyFunction = httpsCallable<{ text: string }, VocabularyAnalysisResult>(
+    functions,
+    'analyzeVocabulary'
+  );
+  
+  private goalAlignmentFunction = httpsCallable<{ text: string; writingGoal: string }, GoalAlignmentResult>(
+    functions,
+    'analyzeGoalAlignment'
   );
 
   /**
@@ -169,6 +240,86 @@ export class FirebaseAIService {
   }
 
   /**
+   * Analyze text for conciseness and sentence structure
+   * SECURE: API key never exposed to browser
+   * @param text - Text to analyze
+   * @param wordLimit - Optional word limit for the text
+   * @returns Conciseness analysis results
+   */
+  async analyzeConciseness(text: string, wordLimit?: number): Promise<ConcisenessAnalysisResult> {
+    this.ensureAuthenticated();
+    
+    if (!text || text.length < 50) {
+      throw new Error('Text must be at least 50 characters long for conciseness analysis');
+    }
+    
+    if (text.length > 5000) {
+      throw new Error('Text too long. Maximum 5000 characters allowed');
+    }
+
+    try {
+      const result = await this.concisenessFunction({ text, wordLimit });
+      return result.data;
+    } catch (error: any) {
+      console.error('Conciseness analysis failed:', error);
+      throw new Error(error.message || 'Failed to analyze conciseness');
+    }
+  }
+
+  /**
+   * Analyze text for vocabulary enhancement opportunities
+   * SECURE: API key never exposed to browser
+   * @param text - Text to analyze
+   * @returns Vocabulary analysis results
+   */
+  async analyzeVocabulary(text: string): Promise<VocabularyAnalysisResult> {
+    this.ensureAuthenticated();
+    
+    if (!text || text.length < 50) {
+      throw new Error('Text must be at least 50 characters long for vocabulary analysis');
+    }
+    
+    if (text.length > 5000) {
+      throw new Error('Text too long. Maximum 5000 characters allowed');
+    }
+
+    try {
+      const result = await this.vocabularyFunction({ text });
+      return result.data;
+    } catch (error: any) {
+      console.error('Vocabulary analysis failed:', error);
+      throw new Error(error.message || 'Failed to analyze vocabulary');
+    }
+  }
+
+  /**
+   * Analyze text for goal-based alignment and personalization
+   * SECURE: API key never exposed to browser
+   * @param text - Text to analyze
+   * @param writingGoal - The student's writing goal/theme
+   * @returns Goal alignment analysis results
+   */
+  async analyzeGoalAlignment(text: string, writingGoal: string): Promise<GoalAlignmentResult> {
+    this.ensureAuthenticated();
+    
+    if (!text || text.length < 100) {
+      throw new Error('Text must be at least 100 characters long for goal alignment analysis');
+    }
+    
+    if (text.length > 5000) {
+      throw new Error('Text too long. Maximum 5000 characters allowed');
+    }
+
+    try {
+      const result = await this.goalAlignmentFunction({ text, writingGoal });
+      return result.data;
+    } catch (error: any) {
+      console.error('Goal alignment analysis failed:', error);
+      throw new Error(error.message || 'Failed to analyze goal alignment');
+    }
+  }
+
+  /**
    * Check if AI services are available
    * @returns True if available
    */
@@ -192,4 +343,7 @@ export type {
   ToneAnalysisResult,
   HealthCheckResult,
   UsageResult,
+  ConcisenessAnalysisResult,
+  VocabularyAnalysisResult,
+  GoalAlignmentResult,
 }; 
