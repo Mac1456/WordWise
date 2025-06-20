@@ -30,6 +30,71 @@ export default function HighlightedTextArea({
     }
   };
 
+  // Sync styles between textarea and highlight overlay
+  useEffect(() => {
+    const syncStyles = () => {
+      if (textareaRef.current && highlightRef.current) {
+        const textarea = textareaRef.current;
+        const highlight = highlightRef.current;
+        
+        // Get computed styles from textarea
+        const computedStyle = window.getComputedStyle(textarea);
+        
+        // Apply exact styles to highlight overlay
+        const stylesToCopy = [
+          'fontSize', 'fontFamily', 'fontWeight', 'fontStyle',
+          'lineHeight', 'letterSpacing', 'wordSpacing', 'textIndent',
+          'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+          'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+          'borderWidth', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+          'borderRadius', 'boxSizing', 'textAlign', 'textTransform',
+          'whiteSpace', 'wordBreak', 'wordWrap', 'overflowWrap'
+        ];
+        
+        stylesToCopy.forEach(prop => {
+          if (prop === 'borderWidth' || prop.includes('border')) {
+            // Make borders transparent to maintain spacing without visual border
+            if (prop === 'borderWidth') {
+              highlight.style.border = `${computedStyle.borderWidth} solid transparent`;
+            } else {
+              (highlight.style as any)[prop] = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
+            }
+          } else {
+            (highlight.style as any)[prop] = computedStyle.getPropertyValue(prop.replace(/([A-Z])/g, '-$1').toLowerCase());
+          }
+        });
+        
+        // Ensure exact positioning and dimensions
+        const rect = textarea.getBoundingClientRect();
+        highlight.style.width = `${textarea.clientWidth}px`;
+        highlight.style.height = `${textarea.clientHeight}px`;
+        
+        // Ensure text decoration is removed from highlights
+        highlight.style.textDecoration = 'none';
+      }
+    };
+
+    // Sync immediately and after various delays
+    syncStyles();
+    
+    const timers = [
+      setTimeout(syncStyles, 1),
+      setTimeout(syncStyles, 10),
+      setTimeout(syncStyles, 50),
+      setTimeout(syncStyles, 100),
+      setTimeout(syncStyles, 200)
+    ];
+    
+    // Also sync on window resize
+    const handleResize = () => syncStyles();
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      timers.forEach(timer => clearTimeout(timer));
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [className, value, suggestions]); // Re-sync when className, value, or suggestions change
+
   // Memoize highlighted content for better performance
   const highlightedContent = useMemo(() => {
     // Early return for no suggestions - improves performance
@@ -115,21 +180,18 @@ export default function HighlightedTextArea({
   }, [suggestions, onSuggestionClick]);
 
   return (
-    <div className="relative">
-      {/* Highlight overlay */}
+    <div className="relative w-full h-full">
+      {/* Highlight overlay - positioned behind textarea */}
       <div
         ref={highlightRef}
-        className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden"
+        className="absolute top-0 left-0 pointer-events-none overflow-hidden whitespace-pre-wrap break-words"
         style={{
-          fontFamily: 'inherit',
-          fontSize: 'inherit',
-          lineHeight: 'inherit',
-          padding: '16px',
-          border: '1px solid transparent',
-          whiteSpace: 'pre-wrap',
-          wordWrap: 'break-word',
           color: 'transparent',
-          zIndex: 1
+          zIndex: 1,
+          width: '100%',
+          height: '100%',
+          background: 'transparent',
+          userSelect: 'none'
         }}
         onScroll={handleScroll}
       >
@@ -138,17 +200,18 @@ export default function HighlightedTextArea({
           dangerouslySetInnerHTML={{ __html: highlightedContent }}
         />
       </div>
-
-      {/* Actual textarea */}
+      
+      {/* Actual textarea - positioned above highlights */}
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onScroll={handleScroll}
         placeholder={placeholder}
-        className={`relative bg-transparent resize-none focus:outline-none ${className}`}
+        className={`relative resize-none focus:outline-none w-full h-full ${className}`}
         style={{
           zIndex: 2,
+          background: 'transparent',
           color: 'rgb(17, 24, 39)', // text-gray-900
           caretColor: 'rgb(17, 24, 39)'
         }}

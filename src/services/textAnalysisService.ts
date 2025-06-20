@@ -18,11 +18,11 @@ export interface TextSuggestion {
 }
 
 export interface ToneAnalysis {
-  overall: 'professional' | 'conversational' | 'formal' | 'casual' | 'passionate' | 'neutral';
-  confidence: number;
-  sincerity: number;
-  engagement: number;
+  overall: 'professional' | 'conversational' | 'formal' | 'casual' | 'passionate' | 'neutral' | 'confident' | 'uncertain' | 'humble' | 'arrogant';
+  strengths: string[];
+  weaknesses: string[];
   recommendations: string[];
+  summary: string;
 }
 
 export interface TextAnalysis {
@@ -51,7 +51,7 @@ class TextAnalysisService {
         console.log('Skipping Typo.js initialization in browser (using AI instead)');
         this.spellChecker = null;
       } else {
-        this.spellChecker = new Typo('en_US');
+      this.spellChecker = new Typo('en_US');
       }
       this.isInitialized = true;
     } catch (error) {
@@ -60,7 +60,75 @@ class TextAnalysisService {
     }
   }
 
-  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean, analysisMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment', wordLimit?: number): Promise<TextAnalysis> {
+  /**
+   * ⚡ INSTANT ANALYSIS: Immediate local checks (0ms delay)
+   * Provides instant feedback for basic spelling, grammar, and style issues
+   * Perfect for real-time typing feedback
+   */
+  async analyzeTextInstant(text: string): Promise<TextAnalysis> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    const suggestions: TextSuggestion[] = [];
+    
+    // Basic text statistics
+    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const wordCount = words.length;
+    const sentenceCount = sentences.length;
+    const characterCount = text.length;
+    const averageWordsPerSentence = sentenceCount > 0 ? wordCount / sentenceCount : 0;
+
+    // ⚡ INSTANT LOCAL CHECKS ONLY - No AI calls
+    console.log('⚡ Running instant-only local checks...');
+    
+    const localGrammarSuggestions = await this.checkGrammar(text);
+    suggestions.push(...localGrammarSuggestions);
+    
+    const localSpellingSuggestions = await this.checkSpelling(text);
+    suggestions.push(...localSpellingSuggestions);
+    
+    const localStyleSuggestions = await this.checkStyle(text, words, sentences);
+    suggestions.push(...localStyleSuggestions);
+    
+    console.log(`⚡ Instant analysis: ${suggestions.length} suggestions found`);
+
+    // Early deduplication before conflict resolution for better performance
+    const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
+    
+    // Resolve conflicts between overlapping suggestions
+    const resolvedSuggestions = this.resolveConflictingSuggestions(deduplicatedSuggestions);
+
+    // Readability analysis
+    const readability = this.calculateReadability(text);
+    const complexWords = this.countComplexWords(words);
+
+    return {
+      suggestions: resolvedSuggestions,
+      readabilityScore: readability.score,
+      readabilityGrade: readability.grade,
+      wordCount,
+      sentenceCount,
+      characterCount,
+      averageWordsPerSentence: Math.round(averageWordsPerSentence * 10) / 10,
+      complexWords,
+      toneAnalysis: undefined
+    };
+  }
+
+  /**
+   * 🚀 HYBRID APPROACH: Instant Local Checks + AI Enhancement
+   * 
+   * Phase 1: INSTANT LOCAL ANALYSIS (0ms delay)
+   * - Basic spelling & grammar checks using compromise.js
+   * - Immediate feedback for common errors
+   * 
+   * Phase 2: AI ENHANCEMENT (background, 2-5s delay)
+   * - Advanced analysis with educational explanations
+   * - Contextual suggestions and improvements
+   */
+  async analyzeText(text: string, writingGoal?: string, includeTone?: boolean, analysisMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment', wordLimit?: number, skipInstantAnalysis?: boolean): Promise<TextAnalysis> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -78,34 +146,35 @@ class TextAnalysisService {
     // Determine which analyses to run based on mode
     const mode = analysisMode || 'comprehensive';
     
-    // Try Firebase AI analysis first, fall back to rule-based if it fails
+    // 🚀 PHASE 1: INSTANT LOCAL CHECKS (Only if not skipped for AI enhancement)
+    if (!skipInstantAnalysis) {
+      console.log('⚡ Running instant local checks...');
+      
+      // Always provide instant local spelling & grammar checks
+      if (mode === 'comprehensive' || mode === 'grammar-only') {
+        const localGrammarSuggestions = await this.checkGrammar(text);
+        suggestions.push(...localGrammarSuggestions);
+        
+        const localSpellingSuggestions = await this.checkSpelling(text);
+        suggestions.push(...localSpellingSuggestions);
+        
+        const localStyleSuggestions = await this.checkStyle(text, words, sentences);
+        suggestions.push(...localStyleSuggestions);
+        
+        console.log(`⚡ Instant local analysis: ${suggestions.length} suggestions found`);
+      }
+    } else {
+      console.log('⚡ Skipping instant local checks (AI enhancement mode)');
+    }
+
+    // 🤖 PHASE 2: AI ENHANCEMENT (Only for advanced features, runs in background)
+    // AI enhances local checks with better explanations and advanced suggestions
     try {
       if (text.trim().length > 20) {
-        console.log(`Attempting Firebase AI analysis (mode: ${mode})...`);
+        console.log(`🤖 Enhancing with AI analysis (mode: ${mode})...`);
         
-        // Layer 1: Grammar & Clarity (Foundation)
-        if (mode === 'comprehensive' || mode === 'grammar-only') {
-          const aiAnalysis = await firebaseAIService.analyzeGrammarAndClarity(text);
-          
-          const aiSuggestions = aiAnalysis.suggestions.map((suggestion: any) => ({
-            id: `ai-grammar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
-            severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
-            message: suggestion.message,
-            originalText: suggestion.originalText,
-            suggestedText: suggestion.suggestedText,
-            startIndex: suggestion.startIndex,
-            endIndex: suggestion.endIndex,
-            explanation: suggestion.explanation,
-            alternatives: undefined
-          }));
-          
-          suggestions.push(...aiSuggestions);
-          console.log(`Added ${aiSuggestions.length} grammar/clarity suggestions`);
-        }
-        
-        // Layer 3: Conciseness & Sentence Structure
-        if (mode === 'comprehensive' || mode === 'conciseness') {
+        // Layer 3: Conciseness & Sentence Structure - minimum 50 characters
+        if ((mode === 'comprehensive' || mode === 'conciseness') && text.trim().length >= 50) {
           try {
             const concisenessAnalysis = await firebaseAIService.analyzeConciseness(text, wordLimit);
             
@@ -123,14 +192,14 @@ class TextAnalysisService {
             }));
             
             suggestions.push(...concisenessSuggestions);
-            console.log(`Added ${concisenessSuggestions.length} conciseness suggestions`);
+            console.log(`🤖 Added ${concisenessSuggestions.length} conciseness suggestions`);
           } catch (error) {
             console.warn('Conciseness analysis failed:', error);
           }
         }
         
-        // Layer 4: Vocabulary Enhancement
-        if (mode === 'comprehensive' || mode === 'vocabulary') {
+        // Layer 4: Vocabulary Enhancement - minimum 50 characters
+        if ((mode === 'comprehensive' || mode === 'vocabulary') && text.trim().length >= 50) {
           try {
             const vocabularyAnalysis = await firebaseAIService.analyzeVocabulary(text);
             
@@ -148,14 +217,14 @@ class TextAnalysisService {
             }));
             
             suggestions.push(...vocabularySuggestions);
-            console.log(`Added ${vocabularySuggestions.length} vocabulary suggestions`);
+            console.log(`🤖 Added ${vocabularySuggestions.length} vocabulary suggestions`);
           } catch (error) {
             console.warn('Vocabulary analysis failed:', error);
           }
         }
         
-        // Layer 6: Goal-Based Personalization
-        if ((mode === 'comprehensive' || mode === 'goal-alignment') && writingGoal) {
+        // Layer 6: Goal-Based Personalization - minimum 100 characters
+        if ((mode === 'comprehensive' || mode === 'goal-alignment') && writingGoal && text.trim().length >= 100) {
           try {
             const goalAnalysis = await firebaseAIService.analyzeGoalAlignment(text, writingGoal);
             
@@ -172,35 +241,78 @@ class TextAnalysisService {
             }));
             
             suggestions.push(...goalSuggestions);
-            console.log(`Added ${goalSuggestions.length} goal-alignment suggestions`);
+            console.log(`🤖 Added ${goalSuggestions.length} goal-alignment suggestions`);
           } catch (error) {
             console.warn('Goal alignment analysis failed:', error);
           }
         }
+
+        // 🎯 AI ENHANCEMENT for Grammar & Spelling (only add NEW suggestions)
+        if ((mode === 'comprehensive' || mode === 'grammar-only') && text.trim().length >= 20) {
+          try {
+            const aiAnalysis = await firebaseAIService.analyzeGrammarAndClarity(text);
+            
+            // Filter out AI suggestions that overlap with existing local suggestions
+            const newAISuggestions = aiAnalysis.suggestions.filter((aiSuggestion: any) => {
+              return !suggestions.some(localSuggestion => {
+                // Check for exact text match
+                if (localSuggestion.originalText.toLowerCase().trim() === aiSuggestion.originalText.toLowerCase().trim()) {
+                  return true;
+                }
+                
+                // Check for positional overlap
+                if (this.suggestionsOverlap({
+                  startIndex: aiSuggestion.startIndex,
+                  endIndex: aiSuggestion.endIndex,
+                  originalText: aiSuggestion.originalText,
+                  suggestedText: aiSuggestion.suggestedText
+                } as any, localSuggestion)) {
+                  return true;
+                }
+                
+                // Check if same suggestion text
+                if (localSuggestion.suggestedText.toLowerCase().trim() === aiSuggestion.suggestedText.toLowerCase().trim() &&
+                    Math.abs(localSuggestion.startIndex - aiSuggestion.startIndex) < 10) {
+                  return true;
+                }
+                
+                return false;
+              });
+            });
+            
+            // Add only non-overlapping AI suggestions (seamless integration)
+            const aiSuggestions = newAISuggestions.map((suggestion: any) => ({
+              id: `ai-grammar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: suggestion.type as 'grammar' | 'spelling' | 'style' | 'vocabulary' | 'goal-alignment',
+              severity: suggestion.severity as 'error' | 'warning' | 'suggestion',
+              message: suggestion.message, // No "AI Enhanced" label
+              originalText: suggestion.originalText,
+              suggestedText: suggestion.suggestedText,
+              startIndex: suggestion.startIndex,
+              endIndex: suggestion.endIndex,
+              explanation: suggestion.explanation, // No emoji prefix
+              alternatives: undefined
+            }));
+            
+            suggestions.push(...aiSuggestions);
+            console.log(`🤖 Added ${aiSuggestions.length} new AI suggestions (${aiAnalysis.suggestions.length - newAISuggestions.length} duplicates filtered)`);
+          } catch (error) {
+            console.warn('AI grammar enhancement failed:', error);
+          }
+        }
       }
     } catch (error) {
-      console.warn('OpenAI analysis failed, falling back to rule-based analysis:', error);
-      
-      // Fallback to rule-based analysis only if AI failed
-      const grammarSuggestions = await this.checkGrammar(text);
-      suggestions.push(...grammarSuggestions);
-
-      const spellingSuggestions = await this.checkSpelling(text);
-      suggestions.push(...spellingSuggestions);
-
-      const styleSuggestions = await this.checkStyle(text, words, sentences);
-      suggestions.push(...styleSuggestions);
+      console.warn('AI enhancement failed, using local analysis only:', error);
     }
 
-    // Remove redundant rule-based suggestions since AI analysis is comprehensive
-    // Only add rule-based if AI analysis produced very few suggestions
-    if (suggestions.length < 2) {
-      const vocabularySuggestions = await this.checkVocabulary();
-      suggestions.push(...vocabularySuggestions);
+    // Add remaining local checks for comprehensive mode
+    if (mode === 'comprehensive') {
+    const vocabularySuggestions = await this.checkVocabulary();
+    suggestions.push(...vocabularySuggestions);
 
-      if (writingGoal) {
-        const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
-        suggestions.push(...goalSuggestions);
+    if (writingGoal) {
+      const goalSuggestions = await this.checkGoalAlignment(text, writingGoal);
+      suggestions.push(...goalSuggestions);
       }
     }
 
@@ -222,18 +334,11 @@ class TextAnalysisService {
     let toneAnalysis: ToneAnalysis | undefined;
     if (includeTone && text.trim().length > 50) {
       try {
-        const aiToneAnalysis = await firebaseAIService.analyzeTone(text);
-        toneAnalysis = {
-          overall: aiToneAnalysis.overall,
-          confidence: aiToneAnalysis.confidence,
-          sincerity: aiToneAnalysis.sincerity,
-          engagement: aiToneAnalysis.engagement,
-          recommendations: aiToneAnalysis.recommendations
-        };
-        console.log('Using AI tone analysis');
+        // Use fast local tone analysis instead of slow AI
+        toneAnalysis = await this.analyzeTone(text);
+        console.log('Using fast local tone analysis');
       } catch (error) {
-        console.warn('AI tone analysis failed, using fallback:', error);
-        toneAnalysis = await this.analyzeTone();
+        console.warn('Tone analysis failed:', error);
       }
     }
 
@@ -346,16 +451,100 @@ class TextAnalysisService {
   private async checkSpelling(text: string): Promise<TextSuggestion[]> {
     const suggestions: TextSuggestion[] = [];
     
-    if (!this.spellChecker) {
-      return suggestions;
-    }
+    // ⚡ INSTANT BROWSER-COMPATIBLE SPELL CHECKER
+    // Common misspellings that high school students make
+    const commonMisspellings: { [key: string]: string[] } = {
+      // Common typos
+      'teh': ['the'],
+      'adn': ['and'],
+      'hte': ['the'],
+      'nad': ['and'],
+      'taht': ['that'],
+      'thier': ['their'],
+      'recieve': ['receive'],
+      'seperate': ['separate'],
+      'definately': ['definitely'],
+      'occured': ['occurred'],
+      'neccessary': ['necessary'],
+      'accomodate': ['accommodate'],
+      'embarass': ['embarrass'],
+      'existance': ['existence'],
+      'maintainance': ['maintenance'],
+      'persistance': ['persistence'],
+      'occurance': ['occurrence'],
+      'referance': ['reference'],
+      'appearence': ['appearance'],
+      'independance': ['independence'],
+      'performence': ['performance'],
+      'experiance': ['experience'],
+      'importence': ['importance'],
+      'differance': ['difference'],
+      'preferance': ['preference'],
+      'occassion': ['occasion'],
+      'begining': ['beginning'],
+      'sucessful': ['successful'],
+      'beleive': ['believe'],
+      'recieved': ['received'],
+      'acheive': ['achieve'],
+      'acheived': ['achieved'],
+      'wierd': ['weird'],
+      'freind': ['friend'],
+      'freinds': ['friends'],
+      'untill': ['until'],
+      'alot': ['a lot'],
+      'aswell': ['as well'],
+      'inorder': ['in order'],
+      'inspite': ['in spite'],
+      'eachother': ['each other'],
+      'everytime': ['every time'],
+      'infact': ['in fact'],
+      'atleast': ['at least'],
+      'aslong': ['as long'],
+      'shouldnt': ["shouldn't"],
+      'couldnt': ["couldn't"],
+      'wouldnt': ["wouldn't"],
+      'didnt': ["didn't"],
+      'dont': ["don't"],
+      'cant': ["can't"],
+      'wont': ["won't"],
+      'isnt': ["isn't"],
+      'wasnt': ["wasn't"],
+      'werent': ["weren't"],
+      'arent': ["aren't"],
+      'hasnt': ["hasn't"],
+      'havent': ["haven't"],
+      'hadnt': ["hadn't"],
+      'youre': ["you're"],
+      'theyre': ["they're"],
+      'were': ["we're"],
+      'its': ["it's"], // Context dependent
+      'your': ["you're"], // Context dependent
+      'there': ["their", "they're"], // Context dependent
+      'to': ["too", "two"], // Context dependent
+      'then': ["than"], // Context dependent
+      'affect': ["effect"], // Context dependent
+      'loose': ["lose"], // Context dependent
+      'breath': ["breathe"], // Context dependent
+      'advise': ["advice"], // Context dependent
+      // Test words for verification
+      'mistaks': ['mistakes'],
+      'previus': ['previous'],
+      'sucess': ['success'],
+      'suceed': ['succeed'],
+      'succes': ['success']
+    };
 
-    const words = text.match(/\b[a-zA-Z]+\b/g) || [];
+    // Use regex to find all word positions accurately
+    const wordRegex = /\b[a-zA-Z]+\b/g;
+    let match;
     
-    for (const word of words) {
-      if (!this.spellChecker.check(word)) {
-        const suggestedWords = this.spellChecker.suggest(word);
-        const startIndex = text.indexOf(word);
+    while ((match = wordRegex.exec(text)) !== null) {
+      const word = match[0];
+      const lowerWord = word.toLowerCase();
+      
+      if (commonMisspellings[lowerWord]) {
+        const suggestions_list = commonMisspellings[lowerWord];
+        const startIndex = match.index;
         
         suggestions.push({
           id: `spelling-${word}-${startIndex}`,
@@ -363,16 +552,17 @@ class TextAnalysisService {
           severity: 'error',
           message: `"${word}" may be misspelled`,
           originalText: word,
-          suggestedText: suggestedWords[0] || word,
+          suggestedText: suggestions_list[0],
           startIndex,
           endIndex: startIndex + word.length,
-          explanation: suggestedWords.length > 0 
-            ? `Did you mean "${suggestedWords.slice(0, 3).join('", "')}"`
-            : 'No suggestions available'
+          explanation: suggestions_list.length > 1 
+            ? `Did you mean "${suggestions_list.slice(0, 3).join('", "')}"`
+            : `Did you mean "${suggestions_list[0]}"?`
         });
       }
     }
 
+    console.log(`⚡ Instant spell check found ${suggestions.length} misspellings`);
     return suggestions;
   }
 
@@ -535,31 +725,69 @@ class TextAnalysisService {
     return suggestions;
   }
 
-  private async analyzeTone(): Promise<ToneAnalysis> {
+  private async analyzeTone(text: string): Promise<ToneAnalysis> {
+    // Fast local tone analysis using keyword detection
+    const words = text.toLowerCase().split(/\s+/);
     
-    // This is a placeholder for more advanced tone analysis
-    let confidence = 0;
-    let sincerity = 0;
-    let engagement = 0;
+    // Analyze confidence indicators
+    const uncertainWords = ['maybe', 'perhaps', 'might', 'possibly', 'probably', 'i think', 'i guess', 'sort of', 'kind of'];
+    const confidentWords = ['will', 'definitely', 'certainly', 'absolutely', 'clearly', 'obviously', 'undoubtedly'];
+    const negativeWords = ['never', 'impossible', 'can\'t', 'won\'t', 'always', 'perfect', 'flawless'];
+    const humbleWords = ['hope', 'try', 'attempt', 'learn', 'grow', 'improve', 'develop'];
     
-    // This is a placeholder for more advanced tone analysis
+    const uncertainCount = uncertainWords.filter(word => text.toLowerCase().includes(word)).length;
+    const confidentCount = confidentWords.filter(word => text.toLowerCase().includes(word)).length;
+    const negativeCount = negativeWords.filter(word => text.toLowerCase().includes(word)).length;
+    const humbleCount = humbleWords.filter(word => text.toLowerCase().includes(word)).length;
+    
+    // Determine overall tone
     let overall: ToneAnalysis['overall'] = 'neutral';
-    
-    // Generate recommendations
+    const strengths: string[] = [];
+    const weaknesses: string[] = [];
     const recommendations: string[] = [];
-    if (confidence < 70) {
-      recommendations.push('Your tone could be more confident. Try removing uncertain words like "maybe" or "perhaps".');
+    
+    if (negativeCount > 2) {
+      overall = 'arrogant';
+      weaknesses.push('Overconfident language that may seem arrogant');
+      recommendations.push('Consider showing humility and acknowledging areas for growth');
+    } else if (confidentCount > uncertainCount && humbleCount > 0) {
+      overall = 'confident';
+      strengths.push('Balanced confidence with humility');
+    } else if (uncertainCount > confidentCount) {
+      overall = 'uncertain';
+      weaknesses.push('Language shows uncertainty and lack of confidence');
+      recommendations.push('Use more decisive language to show confidence in your abilities');
+    } else if (humbleCount > confidentCount) {
+      overall = 'humble';
+      strengths.push('Shows willingness to learn and grow');
     }
-    if (sincerity < 60) {
-      recommendations.push('Include more passionate language about your interests and goals.');
+    
+    // Check for professional language
+    const formalWords = ['experience', 'opportunity', 'develop', 'skills', 'knowledge', 'professional'];
+    const formalCount = formalWords.filter(word => text.toLowerCase().includes(word)).length;
+    
+    if (formalCount > 2) {
+      if (overall === 'neutral') overall = 'professional';
+      strengths.push('Uses professional, academic language');
     }
+    
+    // Generate specific recommendations
+    if (text.includes('never failed') || text.includes('perfect')) {
+      recommendations.push('Avoid absolute statements like "never failed" - show growth mindset instead');
+    }
+    
+    if (text.length < 100) {
+      recommendations.push('Consider expanding your response to show more depth and reflection');
+    }
+    
+    const summary = `Your writing has a ${overall} tone. ${strengths.length > 0 ? 'Strengths include: ' + strengths.join(', ') + '. ' : ''}${weaknesses.length > 0 ? 'Areas for improvement: ' + weaknesses.join(', ') + '.' : ''}`;
     
     return {
       overall,
-      confidence,
-      sincerity,
-      engagement,
+      strengths,
+      weaknesses,
       recommendations,
+      summary
     };
   }
 
@@ -568,18 +796,26 @@ class TextAnalysisService {
     const unique: TextSuggestion[] = [];
   
     for (const suggestion of suggestions) {
-      // Create a unique key based on text range and suggested replacement
-      const key = `${suggestion.startIndex}-${suggestion.endIndex}-${suggestion.originalText}-${suggestion.suggestedText}`;
+      // Create a unique key based on text range, type, and suggested replacement
+      const key = `${suggestion.startIndex}-${suggestion.endIndex}-${suggestion.type}-${suggestion.originalText}-${suggestion.suggestedText}`;
       
       if (!seen.has(key)) {
         seen.add(key);
         unique.push(suggestion);
       } else {
-        console.log(`Removing duplicate suggestion: "${suggestion.originalText}" → "${suggestion.suggestedText}"`);
+        console.log(`🔄 Removing exact duplicate: "${suggestion.originalText}" → "${suggestion.suggestedText}" (${suggestion.type})`);
       }
     }
   
     return unique;
+  }
+
+  public mergeSuggestions(baseSuggestions: TextSuggestion[], newSuggestions: TextSuggestion[]): TextSuggestion[] {
+    console.log(`🔄 Merging suggestions: ${baseSuggestions.length} base + ${newSuggestions.length} new`);
+    const combined = [...baseSuggestions, ...newSuggestions];
+    const resolved = this.resolveConflictingSuggestions(combined);
+    console.log(`✅ Merge complete: ${combined.length} → ${resolved.length} suggestions`);
+    return resolved;
   }
 
   private resolveConflictingSuggestions(suggestions: TextSuggestion[]): TextSuggestion[] {
@@ -593,17 +829,19 @@ class TextAnalysisService {
     // Sort suggestions by start index to process them in order
     const sortedSuggestions = [...deduplicatedSuggestions].sort((a, b) => a.startIndex - b.startIndex);
     const resolvedSuggestions: TextSuggestion[] = [];
+    let conflictCount = 0;
 
     for (const currentSuggestion of sortedSuggestions) {
       let hasConflict = false;
 
-      // Check if this suggestion overlaps with any already resolved suggestion
+      // Check if this suggestion truly conflicts with any already resolved suggestion
       for (const resolvedSuggestion of resolvedSuggestions) {
         if (this.suggestionsOverlap(currentSuggestion, resolvedSuggestion)) {
-          // Determine which suggestion to keep based on priority
+          conflictCount++;
+          // For exact duplicates, keep the higher priority one
           const keepCurrent = this.shouldKeepCurrentSuggestion(currentSuggestion, resolvedSuggestion);
           
-          console.log(`Conflict detected: "${currentSuggestion.originalText}" (${currentSuggestion.type}) vs "${resolvedSuggestion.originalText}" (${resolvedSuggestion.type}), keeping: ${keepCurrent ? 'current' : 'existing'}`);
+          console.log(`⚠️ Conflict #${conflictCount}: "${currentSuggestion.originalText}" (${currentSuggestion.type}) vs "${resolvedSuggestion.originalText}" (${resolvedSuggestion.type}), keeping: ${keepCurrent ? 'current' : 'existing'}`);
           
           if (keepCurrent) {
             // Remove the conflicting resolved suggestion and add current one
@@ -623,18 +861,27 @@ class TextAnalysisService {
       }
     }
 
+    if (conflictCount > 0) {
+      console.log(`🔧 Conflict resolution: ${sortedSuggestions.length} → ${resolvedSuggestions.length} suggestions (${conflictCount} conflicts resolved)`);
+    }
+
     // Sort by start index again for consistent ordering
     return resolvedSuggestions.sort((a, b) => a.startIndex - b.startIndex);
   }
 
   private suggestionsOverlap(suggestion1: TextSuggestion, suggestion2: TextSuggestion): boolean {
-    // Check if the text ranges overlap
-    return !(suggestion1.endIndex <= suggestion2.startIndex || suggestion2.endIndex <= suggestion1.startIndex);
+    // Only consider true conflicts - exact same text range and same replacement
+    const exactSameRange = suggestion1.startIndex === suggestion2.startIndex && suggestion1.endIndex === suggestion2.endIndex;
+    const sameOriginalText = suggestion1.originalText.toLowerCase().trim() === suggestion2.originalText.toLowerCase().trim();
+    
+    // Only treat as overlap if it's the exact same text being replaced
+    // This allows word-level (spelling) and sentence-level (grammar) suggestions to coexist
+    return exactSameRange && sameOriginalText;
   }
 
   private shouldKeepCurrentSuggestion(current: TextSuggestion, existing: TextSuggestion): boolean {
     // Priority order (higher number = higher priority):
-    // 1. spelling errors (most specific)
+    // 1. spelling errors (most specific and critical)
     // 2. grammar errors  
     // 3. style suggestions
     // 4. vocabulary suggestions

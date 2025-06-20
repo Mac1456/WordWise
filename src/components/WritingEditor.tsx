@@ -43,6 +43,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null)
   const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
   const [analysisTimeout, setAnalysisTimeout] = useState<NodeJS.Timeout | null>(null)
+  const [lastAnalyzedContent, setLastAnalyzedContent] = useState<string>('')
+  const [isApplyingSuggestion, setIsApplyingSuggestion] = useState(false)
+  const [analysisInProgress, setAnalysisInProgress] = useState(false)
 
   useEffect(() => {
     if (documentId && documents.length > 0) {
@@ -51,6 +54,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         setCurrentDocument(doc)
         setContent(doc.content)
         setWordLimit(doc.metadata?.wordLimit || null)
+        // Don't set lastAnalyzedContent to trigger analysis on load
+        setLastAnalyzedContent('')
+        setAnalysis(null) // Clear any existing analysis
       }
     }
   }, [documentId, documents, setCurrentDocument])
@@ -59,6 +65,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     if (currentDocument) {
       setContent(currentDocument.content)
       setWordLimit(currentDocument.metadata?.wordLimit || null)
+      // Don't set lastAnalyzedContent to trigger analysis on load
+      setLastAnalyzedContent('')
+      setAnalysis(null) // Clear any existing analysis
     }
   }, [currentDocument])
 
@@ -75,9 +84,28 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
   // Optimized text analysis with better debouncing and conflict prevention
   useEffect(() => {
-    if (!content.trim()) {
+      if (!content.trim()) {
       setAnalysis(null)
       setIsAutoAnalyzing(false)
+      setAnalysisInProgress(false)
+      setLastAnalyzedContent('')
+        return
+      }
+
+    // Skip analysis for very short text (less than meaningful sentence)
+    if (content.trim().length < 15) {
+      setAnalysis(null)
+      return
+    }
+
+    // Skip analysis if content hasn't actually changed
+    if (content === lastAnalyzedContent) {
+      return
+    }
+
+    // Skip if any analysis is in progress
+    if (analysisInProgress || isAnalyzing || isAutoAnalyzing || isApplyingSuggestion) {
+      console.log('⏳ Analysis blocked - another operation in progress')
       return
     }
 
@@ -86,31 +114,92 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       clearTimeout(analysisTimeout)
     }
 
-    // Skip if already analyzing to prevent conflicts
-    if (isAnalyzing || isAutoAnalyzing) {
-      return
-    }
-
     const analyzeTimer = setTimeout(async () => {
-      if (content.trim().length > 10 && !isAnalyzing && !isAutoAnalyzing) {
+      // Final check before starting analysis
+      if (analysisInProgress || isAnalyzing || isAutoAnalyzing || isApplyingSuggestion) {
+        console.log('⏳ Analysis blocked - operation in progress')
+        return
+      }
+
+      // Skip if content hasn't changed since last analysis
+      if (content === lastAnalyzedContent) {
+        console.log('⏸️ Content unchanged, skipping analysis')
+          return
+        }
+
+      if (content.trim().length >= 15) {
+        // Store the content we're analyzing
+        const contentToAnalyze = content;
+        
+        // Set all blocking flags immediately
+        setAnalysisInProgress(true)
         setIsAutoAnalyzing(true)
+        setLastAnalyzedContent(contentToAnalyze)
+        
         try {
-          const result = await textAnalysisService.analyzeText(content, writingGoal, false, analysisMode, wordLimit || undefined)
-          setAnalysis(result)
+          console.log(`🚀 Starting unified analysis for: "${contentToAnalyze.slice(0, 30)}..."`)
+          
+          // ⚡ Get instant suggestions first
+          const instantResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
+          console.log(`⚡ Instant suggestions: ${instantResult.suggestions.length}`)
+          
+          // Always show instant results immediately
+          setAnalysis(instantResult);
+          
+          // 🤖 Get AI suggestions and merge them
+          if (contentToAnalyze.trim().length >= 20) {
+            console.log('🤖 Getting AI enhancement...')
+            const enhancedResult = await textAnalysisService.analyzeText(contentToAnalyze, writingGoal, false, analysisMode, wordLimit || undefined, true)
+            
+            const mergedSuggestions = textAnalysisService.mergeSuggestions(instantResult.suggestions, enhancedResult.suggestions);
+            
+            console.log(`🤖 AI enhancement: ${enhancedResult.suggestions.length} AI suggestions, ${mergedSuggestions.length} total after merge`)
+            
+            // Only update if AI actually added new suggestions (not just duplicates)
+            const newAISuggestions = enhancedResult.suggestions.filter(aiSugg => 
+              !instantResult.suggestions.some(instSugg => 
+                instSugg.originalText === aiSugg.originalText && 
+                instSugg.suggestedText === aiSugg.suggestedText
+              )
+            );
+            
+            if (newAISuggestions.length > 0) {
+              const finalAnalysis = {
+                ...enhancedResult,
+                suggestions: mergedSuggestions,
+              };
+              setAnalysis(finalAnalysis);
+              console.log(`✅ Added ${newAISuggestions.length} new AI suggestions. Total: ${mergedSuggestions.length}`)
+            } else {
+              console.log(`⚡ No new AI suggestions found, keeping instant suggestions: ${instantResult.suggestions.length}`)
+            }
+        } else {
+            console.log(`✅ Analysis complete (instant only). Total suggestions: ${instantResult.suggestions.length}`)
+          }
+          
         } catch (error) {
-          console.error('Auto-analysis failed:', error)
+          console.error('❌ Analysis failed:', error)
+          // Fall back to instant analysis only if AI fails
+          try {
+            const fallbackResult = await textAnalysisService.analyzeTextInstant(contentToAnalyze)
+            setAnalysis(fallbackResult)
+            console.log('⚡ Fallback to instant-only analysis')
+          } catch (fallbackError) {
+            console.error('❌ Fallback analysis also failed:', fallbackError)
+        }
         } finally {
           setIsAutoAnalyzing(false)
+          setAnalysisInProgress(false)
         }
       }
-    }, 2000) // Increased to 2 seconds for better performance
+    }, 300) // Reduce debounce time back to 300ms for better responsiveness
 
     setAnalysisTimeout(analyzeTimer)
     return () => {
       clearTimeout(analyzeTimer)
       setAnalysisTimeout(null)
     }
-  }, [content, isAnalyzing, isAutoAnalyzing, writingGoal, analysisMode, wordLimit])
+  }, [content])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -142,6 +231,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }, [analysis])
 
   const handleContentChange = (newContent: string) => {
+    console.log(`📝 Content change: "${newContent.slice(0, 50)}..." (length: ${newContent.length})`)
     setContent(newContent)
     setSelectedSuggestion(null)
     
@@ -212,17 +302,44 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }
 
   const applySuggestion = (suggestion: TextSuggestion) => {
+    setIsApplyingSuggestion(true)
+    setAnalysisInProgress(true) // Block all analysis
+    
     const newContent = 
       content.substring(0, suggestion.startIndex) + 
       suggestion.suggestedText + 
       content.substring(suggestion.endIndex)
+
+    // Calculate text shift for adjusting other suggestions
+    const textShift = suggestion.suggestedText.length - suggestion.originalText.length
     
-    // Immediately clear all suggestions to remove highlighting
-    setAnalysis(null)
+    // Remove the applied suggestion and adjust positions of remaining suggestions
+    if (analysis) {
+      const updatedSuggestions = analysis.suggestions
+        .filter(s => s.id !== suggestion.id)  // Remove applied suggestion
+        .map(s => {
+          // Adjust positions of suggestions that come after the applied one
+          if (s.startIndex > suggestion.endIndex) {
+            return {
+              ...s,
+              startIndex: s.startIndex + textShift,
+              endIndex: s.endIndex + textShift
+            }
+          }
+          return s
+        })
+      
+      setAnalysis({
+        ...analysis,
+        suggestions: updatedSuggestions
+      })
+    }
+    
     setSelectedSuggestion(null)
     
-    // Apply the change
+    // Apply the change and update tracked content atomically
     setContent(newContent)
+    setLastAnalyzedContent(newContent) // Update tracked content to prevent immediate re-analysis
     
     // Clear existing timeout
     if (autoSaveTimeout) {
@@ -236,15 +353,18 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     setAutoSaveTimeout(timeout)
     
     // Track suggestion acceptance for learning
-    console.log('Suggestion applied:', {
+    console.log('✅ Suggestion applied:', {
       type: suggestion.type,
       severity: suggestion.severity,
       originalText: suggestion.originalText,
       suggestedText: suggestion.suggestedText
     })
     
-    // Note: Re-analysis will be triggered automatically by the content change effect
-    // with proper debouncing to prevent performance issues
+    // Allow analysis to resume after content is stable
+    setTimeout(() => {
+      setIsApplyingSuggestion(false)
+      setAnalysisInProgress(false)
+    }, 150)
   }
 
   const dismissSuggestion = (suggestionId: string, helpful: boolean = false) => {
@@ -273,15 +393,14 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
     const suggestions = suggestionsToApply || analysis.suggestions
     if (suggestions.length === 0) return
-
-    // Immediately clear suggestions to remove highlighting
-    setAnalysis(null)
-    setSelectedSuggestion(null)
+    
+    setIsApplyingSuggestion(true)
+    setAnalysisInProgress(true) // Block all analysis during bulk application
 
     // Sort suggestions by start index in descending order (end to start)
     // This prevents index conflicts when applying multiple changes
     const sortedSuggestions = [...suggestions].sort((a, b) => b.startIndex - a.startIndex)
-    
+
     let newContent = content
     let appliedCount = 0
 
@@ -292,9 +411,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       // Verify the suggestion is still valid (text hasn't changed)
       const originalText = newContent.substring(suggestion.startIndex, suggestion.endIndex)
       if (originalText === suggestion.originalText) {
-        newContent = 
+        newContent =
           newContent.substring(0, suggestion.startIndex) + 
-          suggestion.suggestedText + 
+          suggestion.suggestedText +
           newContent.substring(suggestion.endIndex)
         
         appliedCount++
@@ -309,8 +428,22 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
       return
     }
 
+    // Remove applied suggestions from the analysis
+    const appliedIds = new Set(suggestions.map(s => s.id))
+    setAnalysis(prevAnalysis => {
+      if (!prevAnalysis) return null
+      
+      return {
+        ...prevAnalysis,
+        suggestions: prevAnalysis.suggestions.filter(s => !appliedIds.has(s.id))
+      }
+    })
+    
+    setSelectedSuggestion(null)
+
     // Update content
     setContent(newContent)
+    setLastAnalyzedContent(newContent) // Update tracked content to prevent immediate re-analysis
 
     // Clear existing timeout
     if (autoSaveTimeout) {
@@ -326,8 +459,13 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     // Show success message
     alert(`Successfully applied ${appliedCount} suggestion${appliedCount === 1 ? '' : 's'}!`)
     
-    // Note: Re-analysis will be triggered automatically by the content change effect
     console.log(`Bulk application completed: ${appliedCount} suggestions applied`)
+    
+    // Allow analysis to resume after bulk application
+    setTimeout(() => {
+      setIsApplyingSuggestion(false)
+      setAnalysisInProgress(false)
+    }, 200)
   }
 
   const applyAllByType = (type: string) => {
@@ -370,9 +508,10 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     setIsRunningToneAnalysis(true)
     try {
       const writingGoal = 'personal-statement'
-      const result = await textAnalysisService.analyzeText(content, writingGoal, true)
+      const result = await textAnalysisService.analyzeText(content, writingGoal, true, 'comprehensive', undefined, false)
       if (result.toneAnalysis) {
         setAnalysis(result)
+        setLastAnalyzedContent(content) // Update tracked content
         setShowToneAnalysis(true)
       }
     } catch (error) {
@@ -384,8 +523,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   }
 
   const runAIAnalysis = async (specificMode?: 'comprehensive' | 'grammar-only' | 'conciseness' | 'vocabulary' | 'goal-alignment') => {
-    if (!content.trim() || content.trim().length < 20) {
-      alert('Please write at least 20 characters for AI analysis.')
+    if (!content.trim() || content.trim().length < 15) {
+      alert('Please write at least 15 characters for analysis.')
       return
     }
 
@@ -405,12 +544,57 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
 
     const targetMode = specificMode || analysisMode
     try {
-      const result = await textAnalysisService.analyzeText(content, writingGoal, false, targetMode, wordLimit || undefined)
-      setAnalysis(result)
-      console.log(`Manual AI analysis completed (${targetMode})`)
+      // 🚀 HYBRID APPROACH: Instant + Enhanced Manual Analysis
+      console.log(`🚀 Starting hybrid manual analysis (${targetMode})...`)
+      
+      // ⚡ PHASE 1: INSTANT LOCAL ANALYSIS (immediate feedback)
+      const instantResult = await textAnalysisService.analyzeTextInstant(content)
+      setAnalysis(instantResult) // Show instant results immediately
+      console.log(`⚡ Instant manual analysis: ${instantResult.suggestions.length} suggestions`)
+      
+      // 🤖 PHASE 2: AI ENHANCEMENT (seamless addition of new suggestions)
+      if (content.trim().length >= 20) {
+        console.log('🤖 Starting AI enhancement...')
+        const enhancedResult = await textAnalysisService.analyzeText(content, writingGoal, false, targetMode, wordLimit || undefined, true)
+        
+        // Seamlessly merge AI suggestions with existing instant suggestions
+        setAnalysis(prevAnalysis => {
+          if (!prevAnalysis) return enhancedResult
+          
+          // Keep all existing suggestions and add new AI suggestions
+          const mergedSuggestions = [
+            ...prevAnalysis.suggestions,
+            ...enhancedResult.suggestions.filter(aiSuggestion => 
+              !prevAnalysis.suggestions.some(existingSuggestion =>
+                existingSuggestion.originalText.toLowerCase() === aiSuggestion.originalText.toLowerCase() ||
+                (Math.abs(existingSuggestion.startIndex - aiSuggestion.startIndex) < 5 &&
+                 Math.abs(existingSuggestion.endIndex - aiSuggestion.endIndex) < 5)
+              )
+            )
+          ]
+          
+          return {
+            ...enhancedResult,
+            suggestions: mergedSuggestions
+          }
+        })
+        
+        console.log(`🤖 AI enhancement completed - seamlessly merged suggestions`)
+      }
+      
+      setLastAnalyzedContent(content) // Update tracked content
+      console.log(`🚀 Hybrid manual analysis completed (${targetMode})`)
     } catch (error) {
-      console.error('Manual AI analysis failed:', error)
-      alert('AI analysis failed. Please check your OpenAI API key and try again.')
+      console.error('Hybrid manual analysis failed:', error)
+      // Fall back to instant analysis only if AI fails
+      try {
+        const fallbackResult = await textAnalysisService.analyzeTextInstant(content)
+        setAnalysis(fallbackResult)
+        console.log('⚡ Fallback to instant analysis only')
+      } catch (fallbackError) {
+        console.error('Fallback analysis also failed:', fallbackError)
+        alert('Analysis failed. Please try again.')
+      }
     } finally {
       setIsAnalyzing(false)
     }
@@ -479,7 +663,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
             <div className="border-b border-gray-200 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <FileText className="h-6 w-6 text-blue-600" />
+                  <div className="p-2 bg-blue-50 rounded-lg">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                  </div>
                   <h1 className="text-xl font-semibold text-gray-900">
                     {currentDocument.title}
                   </h1>
@@ -566,7 +752,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                 {/* Word Limit */}
                 <div className="flex items-center space-x-2">
                   <label className="text-sm text-gray-700">
-                    Limit:
+                    Word limit:
                     <input
                       type="number"
                       value={wordLimit || ''}
@@ -582,73 +768,12 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                   )}
                 </div>
 
-                {/* Writing Goal */}
-                <select
-                  value={writingGoal}
-                  onChange={(e) => setWritingGoal(e.target.value)}
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="personal-statement">Personal Statement</option>
-                  <option value="leadership">Leadership</option>
-                  <option value="resilience">Resilience</option>
-                  <option value="service">Community Service</option>
-                  <option value="creativity">Creativity</option>
-                  <option value="academic">Academic</option>
-                  <option value="personal-growth">Personal Growth</option>
-                  <option value="diversity">Diversity</option>
-                  <option value="career-goals">Career Goals</option>
-                </select>
-
-                {/* Analysis Mode */}
-                <select
-                  value={analysisMode}
-                  onChange={(e) => setAnalysisMode(e.target.value as any)}
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="comprehensive">All Features</option>
-                  <option value="grammar-only">Grammar Only</option>
-                  <option value="conciseness">Conciseness</option>
-                  <option value="vocabulary">Vocabulary</option>
-                  <option value="goal-alignment">Goal Alignment</option>
-                </select>
-
-                {/* Quick Actions */}
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => runAIAnalysis('grammar-only')}
-                    disabled={isAnalyzing || content.trim().length < 20}
-                    className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
-                    title="Grammar Check"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => runAIAnalysis('conciseness')}
-                    disabled={isAnalyzing || content.trim().length < 50}
-                    className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
-                    title="Make Concise"
-                  >
-                    📝
-                  </button>
-                  <button
-                    onClick={() => runAIAnalysis('vocabulary')}
-                    disabled={isAnalyzing || content.trim().length < 50}
-                    className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
-                    title="Enhance Vocabulary"
-                  >
-                    📚
-                  </button>
-                  <button
-                    onClick={() => runAIAnalysis('goal-alignment')}
-                    disabled={isAnalyzing || content.trim().length < 100}
-                    className="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 disabled:opacity-50"
-                    title="Goal Alignment"
-                  >
-                    🎯
-                  </button>
+                {/* Status indicator */}
+                <div className="flex items-center space-x-2 text-sm text-gray-600">
+                  <span>✨ Comprehensive analysis enabled</span>
                 </div>
-              </div>
             </div>
+                    </div>
 
             {/* Editor */}
             <div className="p-4">
@@ -752,7 +877,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
             </div>
             
             {/* Bulk Action Buttons */}
-            {analysis?.suggestions.length && analysis.suggestions.length > 1 && !isAnyAnalysisRunning && (
+            {analysis?.suggestions.length && analysis.suggestions.length > 1 && (
               <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-medium text-gray-700">Quick Actions</div>
@@ -822,9 +947,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                     </button>
                   )}
                 </div>
-              </div>
-            )}
-            
+                  </div>
+                )}
+
             {!analysis?.suggestions.length ? (
               <div className="text-center py-8">
                 <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
@@ -921,8 +1046,8 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                         </div>
                       </div>
                     )}
-                  </div>
-                ))}
+                        </div>
+                      ))}
 
 
               </div>
