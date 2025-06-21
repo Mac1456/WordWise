@@ -332,6 +332,22 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         
         await updateDoc(docRef, updatedData);
         console.log('Document updated in Firestore:', id);
+        
+        // Update local state after successful Firestore update
+        const documents = get().documents
+        const docIndex = documents.findIndex(doc => doc.id === id)
+        
+        if (docIndex !== -1) {
+          const updatedDoc = { ...documents[docIndex], ...updatedData }
+          const newDocuments = [...documents]
+          newDocuments[docIndex] = updatedDoc
+
+          set({ documents: newDocuments })
+
+          if (get().currentDocument?.id === id) {
+            set({ currentDocument: updatedDoc })
+          }
+        }
       }
     } catch (error: any) {
       console.error('Failed to update document:', error)
@@ -373,6 +389,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
         await deleteDoc(docRef);
         console.log('Document deleted from Firestore:', id);
+        
+        // Update local state after successful Firestore deletion
+        const documents = get().documents
+        const newDocuments = documents.filter(doc => doc.id !== id)
+        set({ documents: newDocuments })
       }
 
       // If the deleted document was the current one, clear it

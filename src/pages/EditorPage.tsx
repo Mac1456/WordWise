@@ -1,13 +1,13 @@
 import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
 import { useDocumentStore } from '../stores/documentStore'
 import WritingEditor from '../components/WritingEditor'
 
 export default function EditorPage() {
   const { documentId } = useParams<{ documentId: string }>()
   const navigate = useNavigate()
-  const { user } = useAuthStore()
+  const { user } = useFirebaseAuthStore()
   const { createDocument, currentDocument } = useDocumentStore()
 
   useEffect(() => {

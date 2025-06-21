@@ -145,6 +145,40 @@ export const useFirebaseAuthStore = create(
               createdAt: data.createdAt || new Date().toISOString(),
               updatedAt: data.updatedAt || new Date().toISOString()
             }
+          } else {
+            // Create profile for existing user who doesn't have one
+            console.log('Creating basic profile for existing user:', userCredential.user.email)
+            profile = {
+              id: userCredential.user.uid,
+              email: userCredential.user.email!,
+              fullName: userCredential.user.displayName || 'User',
+              preferences: {
+                theme: 'light',
+                notifications: true,
+                autoSave: true,
+                suggestionFrequency: 'medium'
+              },
+              writingGoals: ['personal-statement'],
+              improvementTracking: {
+                grammarScore: 0,
+                styleScore: 0,
+                vocabularyScore: 0,
+                overallProgress: 0,
+                weeklyGoals: [],
+                achievements: []
+              },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+
+            // Save the new profile to Firestore
+            await setDoc(doc(db, 'users', userCredential.user.uid), {
+              ...profile,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            })
+            
+            console.log('Basic profile created successfully for existing user')
           }
 
           set({ user: userCredential.user, profile, loading: false })
@@ -224,7 +258,7 @@ export const useFirebaseAuthStore = create(
             await updateProfile(userCredential.user, { displayName: fullName })
           }
           
-          // Create user profile in Firestore
+          // Create user profile in Firestore automatically
           const profile: UserProfile = {
             id: userCredential.user.uid,
             email: userCredential.user.email!,
@@ -321,6 +355,8 @@ export const useFirebaseAuthStore = create(
         }
       },
 
+
+
       resetPassword: async (email: string) => {
         try {
           if (isDevelopment) {
@@ -377,6 +413,44 @@ export const useFirebaseAuthStore = create(
                 },
                 createdAt: data.createdAt || new Date().toISOString(),
                 updatedAt: data.updatedAt || new Date().toISOString()
+              }
+            } else {
+              // Create profile for existing user who doesn't have one
+              console.log('Creating basic profile for existing user in auth state listener:', user.email)
+              profile = {
+                id: user.uid,
+                email: user.email!,
+                fullName: user.displayName || 'User',
+                preferences: {
+                  theme: 'light',
+                  notifications: true,
+                  autoSave: true,
+                  suggestionFrequency: 'medium'
+                },
+                writingGoals: ['personal-statement'],
+                improvementTracking: {
+                  grammarScore: 0,
+                  styleScore: 0,
+                  vocabularyScore: 0,
+                  overallProgress: 0,
+                  weeklyGoals: [],
+                  achievements: []
+                },
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }
+
+              try {
+                // Save the new profile to Firestore
+                await setDoc(doc(db, 'users', user.uid), {
+                  ...profile,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                })
+                
+                console.log('Basic profile created successfully for existing user in auth state listener')
+              } catch (error) {
+                console.error('Failed to create profile for existing user:', error)
               }
             }
 

@@ -714,7 +714,7 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
           } else {
             console.log(`🤖 Rejected invalid suggestion: ${suggestion.originalText} -> ${suggestion.suggestedText}`);
           }
-        } catch (error) {
+      } catch (error) {
           console.warn('AI validation failed for suggestion, including anyway:', error);
           suggestion.aiValidated = false;
           suggestion.confidence = Math.max(suggestion.confidence - 0.1, 0.1); // Lower confidence for unvalidated suggestions

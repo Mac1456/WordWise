@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import { useFirebaseAuthStore } from '../stores/firebaseAuthStore'
 import LoadingSpinner from './LoadingSpinner'
 
 interface ProtectedRouteProps {
@@ -7,7 +7,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { user, loading } = useAuthStore()
+  const { user, loading } = useFirebaseAuthStore()
 
   if (loading) {
     return (
