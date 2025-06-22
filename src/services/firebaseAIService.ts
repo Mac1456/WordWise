@@ -150,6 +150,122 @@ export class FirebaseAIService {
     'analyzeWithCustomPrompt'
   );
 
+  // 🚀 NEW: Request deduplication and caching
+  private requestCache = new Map<string, Promise<any>>();
+  private resultCache = new Map<string, any>();
+
+  /**
+   * 🚀 OPTIMIZED: Get cache key for requests
+   */
+  private getCacheKey(functionName: string, params: any): string {
+    const paramString = typeof params === 'string' ? params.slice(0, 100) : JSON.stringify(params).slice(0, 100);
+    return `${functionName}-${this.simpleHash(paramString)}`;
+  }
+
+  private simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  /**
+   * 🚀 OPTIMIZED: Generic cached function call
+   */
+  private async cachedFunctionCall<T, R>(
+    func: any,
+    params: T,
+    functionName: string,
+    cacheDuration: number = 300000 // 5 minutes
+  ): Promise<R> {
+    const cacheKey = this.getCacheKey(functionName, params);
+    
+    // Check result cache first
+    if (this.resultCache.has(cacheKey)) {
+      console.log(`🎯 Cache hit for ${functionName}`);
+      return this.resultCache.get(cacheKey);
+    }
+    
+    // Check if request is already pending
+    if (this.requestCache.has(cacheKey)) {
+      console.log(`🔄 Waiting for pending ${functionName} request`);
+      return await this.requestCache.get(cacheKey);
+    }
+
+    // Make new request
+    const requestPromise = this.makeRequest(func, params, functionName);
+    this.requestCache.set(cacheKey, requestPromise);
+
+    try {
+      const result = await requestPromise;
+      
+      // Cache the result
+      this.resultCache.set(cacheKey, result);
+      
+      // Auto-cleanup cache after duration
+      setTimeout(() => {
+        this.resultCache.delete(cacheKey);
+      }, cacheDuration);
+      
+      // Keep cache size manageable
+      if (this.resultCache.size > 100) {
+        const firstKey = this.resultCache.keys().next().value;
+        if (firstKey) {
+          this.resultCache.delete(firstKey);
+        }
+      }
+      
+      return result;
+    } finally {
+      this.requestCache.delete(cacheKey);
+    }
+  }
+
+  private async makeRequest(func: any, params: any, functionName: string) {
+    console.log(`🚀 Making ${functionName} request`);
+    const startTime = performance.now();
+    
+    try {
+      const result = await func(params);
+      const endTime = performance.now();
+      console.log(`✅ ${functionName} completed in ${Math.round(endTime - startTime)}ms`);
+      return result.data;
+    } catch (error: any) {
+      console.error(`❌ ${functionName} failed:`, error);
+      throw new Error(error.message || `${functionName} failed`);
+    }
+  }
+
+  /**
+   * Clear cache - useful when suggestions are dismissed to prevent re-appearance
+   */
+  public clearCache(text?: string): void {
+    if (text) {
+      // Clear cache entries for this specific text
+      const textHash = this.simpleHash(text.slice(0, 100));
+      const keysToRemove: string[] = [];
+      
+      for (const key of this.resultCache.keys()) {
+        if (key.includes(textHash)) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      keysToRemove.forEach(key => {
+        this.resultCache.delete(key);
+        console.log(`🗑️ Cleared Firebase AI cache for: ${key}`);
+      });
+    } else {
+      // Clear all cache
+      this.resultCache.clear();
+      this.requestCache.clear();
+      console.log('🗑️ Cleared all Firebase AI cache');
+    }
+  }
+
   /**
    * Check if user is authenticated
    */
@@ -177,13 +293,13 @@ export class FirebaseAIService {
       throw new Error('Text too long. Maximum 5000 characters allowed');
     }
 
-    try {
-      const result = await this.grammarFunction({ text });
-      return result.data;
-    } catch (error: any) {
-      console.error('Grammar analysis failed:', error);
-      throw new Error(error.message || 'Failed to analyze text');
-    }
+    // 🚀 OPTIMIZED: Use cached function call
+    return this.cachedFunctionCall(
+      this.grammarFunction,
+      { text },
+      'analyzeGrammarAndClarity',
+      600000 // 10 minutes cache for grammar analysis
+    );
   }
 
   /**
@@ -262,13 +378,13 @@ export class FirebaseAIService {
       throw new Error('Text too long. Maximum 5000 characters allowed');
     }
 
-    try {
-      const result = await this.concisenessFunction({ text, wordLimit });
-      return result.data;
-    } catch (error: any) {
-      console.error('Conciseness analysis failed:', error);
-      throw new Error(error.message || 'Failed to analyze conciseness');
-    }
+    // 🚀 OPTIMIZED: Use cached function call
+    return this.cachedFunctionCall(
+      this.concisenessFunction,
+      { text, wordLimit },
+      'analyzeConciseness',
+      300000 // 5 minutes cache for conciseness analysis
+    );
   }
 
   /**
@@ -288,13 +404,13 @@ export class FirebaseAIService {
       throw new Error('Text too long. Maximum 5000 characters allowed');
     }
 
-    try {
-      const result = await this.vocabularyFunction({ text });
-      return result.data;
-    } catch (error: any) {
-      console.error('Vocabulary analysis failed:', error);
-      throw new Error(error.message || 'Failed to analyze vocabulary');
-    }
+    // 🚀 OPTIMIZED: Use cached function call
+    return this.cachedFunctionCall(
+      this.vocabularyFunction,
+      { text },
+      'analyzeVocabulary',
+      600000 // 10 minutes cache for vocabulary analysis
+    );
   }
 
   /**
@@ -315,13 +431,13 @@ export class FirebaseAIService {
       throw new Error('Text too long. Maximum 5000 characters allowed');
     }
 
-    try {
-      const result = await this.goalAlignmentFunction({ text, writingGoal });
-      return result.data;
-    } catch (error: any) {
-      console.error('Goal alignment analysis failed:', error);
-      throw new Error(error.message || 'Failed to analyze goal alignment');
-    }
+    // 🚀 OPTIMIZED: Use cached function call
+    return this.cachedFunctionCall(
+      this.goalAlignmentFunction,
+      { text, writingGoal },
+      'analyzeGoalAlignment',
+      450000 // 7.5 minutes cache for goal alignment analysis
+    );
   }
 
   /**

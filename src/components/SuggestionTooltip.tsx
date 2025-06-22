@@ -4,7 +4,7 @@ import { TextSuggestion } from '../services/textAnalysisService'
 interface SuggestionTooltipProps {
   suggestion: TextSuggestion
   position: { x: number; y: number }
-  onApply: () => void
+  onApply: (alternativeText?: string) => void
   onClose: () => void
   onDismiss?: () => void
 }
@@ -134,8 +134,9 @@ export default function SuggestionTooltip({
               <button
                 key={index}
                 onClick={() => {
-                  // Apply alternative directly
-                  onApply();
+                  console.log('SuggestionTooltip: Applying alternative:', alt)
+                  // Apply alternative by passing it to onApply
+                  onApply(alt);
                 }}
                 className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 break-words"
               >
@@ -150,7 +151,7 @@ export default function SuggestionTooltip({
       <div className="flex items-center justify-between gap-2">
         {suggestion.originalText !== suggestion.suggestedText && (
           <button
-            onClick={onApply}
+            onClick={() => onApply()}
             className="flex items-center space-x-2 px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
           >
             <Check className="h-4 w-4" />

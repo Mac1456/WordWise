@@ -1,5 +1,5 @@
 import nlp from 'compromise';
-import Typo from 'typo-js';
+// import Typo from 'typo-js'; // Commented out as not used
 import { readabilityScore } from 'readability-score';
 import { firebaseAIService } from './firebaseAIService';
 
@@ -42,6 +42,8 @@ export interface TextAnalysis {
 class TextAnalysisService {
   private isInitialized = false;
   private suggestionCache = new Map<string, boolean>(); // Cache for AI validation results
+  private analysisCache = new Map<string, TextAnalysis>(); // NEW: Cache for complete analysis results
+  private pendingAIRequests = new Map<string, Promise<any>>(); // NEW: Prevent duplicate concurrent requests
 
   async initialize() {
     if (this.isInitialized) return;
@@ -56,6 +58,205 @@ class TextAnalysisService {
     } catch (error) {
       console.warn('Spell checker initialization failed, using AI fallback:', error);
     }
+  }
+
+  /**
+   * Clear analysis cache - useful when suggestions are dismissed to prevent re-appearance
+   */
+  public clearAnalysisCache(text?: string): void {
+    if (text) {
+      // Clear cache entries for this specific text
+      const textHash = this.simpleHash(text);
+      const keysToRemove: string[] = [];
+      
+      for (const key of this.analysisCache.keys()) {
+        if (key.includes(textHash)) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      keysToRemove.forEach(key => {
+        this.analysisCache.delete(key);
+        console.log(`🗑️ Cleared analysis cache for: ${key}`);
+      });
+    } else {
+      // Clear all cache
+      this.analysisCache.clear();
+      this.suggestionCache.clear();
+      console.log('🗑️ Cleared all analysis cache');
+    }
+  }
+
+  /**
+   * 🚀 OPTIMIZED: Batch AI Analysis - Single API call for multiple analysis types
+   */
+  private async batchAIAnalysis(text: string, writingGoal?: string): Promise<TextSuggestion[]> {
+    const cacheKey = `batch-${text.slice(0, 100)}-${writingGoal || 'none'}`;
+    
+    // Check if request is already pending to avoid duplicates
+    if (this.pendingAIRequests.has(cacheKey)) {
+      console.log('🔄 Waiting for pending batch AI request...');
+      return await this.pendingAIRequests.get(cacheKey)!;
+    }
+
+    const batchPromise = this.executeBatchAnalysis(text, writingGoal);
+    this.pendingAIRequests.set(cacheKey, batchPromise);
+
+    try {
+      const result = await batchPromise;
+      return result;
+    } finally {
+      this.pendingAIRequests.delete(cacheKey);
+    }
+  }
+
+  private async executeBatchAnalysis(text: string, writingGoal?: string): Promise<TextSuggestion[]> {
+    const suggestions: TextSuggestion[] = [];
+
+    try {
+      console.log('🚀 Starting optimized batch AI analysis...');
+      
+      // Run AI analyses in parallel instead of sequentially
+      const aiPromises: Promise<any>[] = [];
+
+      // Grammar & Clarity (always run)
+      if (text.trim().length >= 15) {
+        aiPromises.push(
+          firebaseAIService.analyzeGrammarAndClarity(text)
+            .then(result => ({ type: 'grammar', result }))
+            .catch(error => ({ type: 'grammar', error }))
+        );
+      }
+
+      // Conciseness (run in parallel)
+      if (text.trim().length >= 20) {
+        aiPromises.push(
+          firebaseAIService.analyzeConciseness(text)
+            .then(result => ({ type: 'conciseness', result }))
+            .catch(error => ({ type: 'conciseness', error }))
+        );
+      }
+
+      // Vocabulary (run in parallel)
+      if (text.trim().length >= 25) {
+        aiPromises.push(
+          firebaseAIService.analyzeVocabulary(text)
+            .then(result => ({ type: 'vocabulary', result }))
+            .catch(error => ({ type: 'vocabulary', error }))
+        );
+      }
+
+      // Goal alignment (run in parallel)
+      if (writingGoal && text.trim().length >= 50) {
+        aiPromises.push(
+          firebaseAIService.analyzeGoalAlignment(text, writingGoal)
+            .then(result => ({ type: 'goal', result }))
+            .catch(error => ({ type: 'goal', error }))
+        );
+      }
+
+      // Wait for all analyses to complete in parallel
+      const results = await Promise.all(aiPromises);
+      
+      // Process results
+      results.forEach((analysis) => {
+        if (analysis.error) {
+          console.warn(`AI ${analysis.type} analysis failed:`, analysis.error);
+          return;
+        }
+
+        if (analysis.result?.suggestions) {
+          const aiSuggestions = analysis.result.suggestions.map((s: any) => this.convertToTextSuggestion(s));
+          
+          // Apply filtering based on analysis type
+          if (analysis.type === 'vocabulary') {
+            const filteredSuggestions = aiSuggestions.filter((s: TextSuggestion) => 
+              this.isAppropriateVocabularySuggestion(s, text)
+            );
+            suggestions.push(...filteredSuggestions);
+            console.log(`🚀 AI ${analysis.type}: ${filteredSuggestions.length}/${aiSuggestions.length} suggestions accepted`);
+          } else {
+            suggestions.push(...aiSuggestions);
+            console.log(`🚀 AI ${analysis.type}: ${aiSuggestions.length} suggestions added`);
+          }
+        }
+      });
+
+      console.log(`🚀 Batch AI analysis complete: ${suggestions.length} total suggestions`);
+      return suggestions;
+
+    } catch (error) {
+      console.error('Batch AI analysis failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🚀 OPTIMIZED: Smart AI Validation - Only validate uncertain suggestions
+   */
+  private async smartValidateAI(suggestions: TextSuggestion[], text: string): Promise<TextSuggestion[]> {
+    const validatedSuggestions: TextSuggestion[] = [];
+    
+    // Separate suggestions by confidence level
+    const highConfidence = suggestions.filter(s => s.confidence >= 0.85);
+    const needValidation = suggestions.filter(s => s.confidence < 0.85);
+    
+    // High confidence suggestions pass through without validation
+    validatedSuggestions.push(
+      ...highConfidence.map(s => ({ ...s, aiValidated: false }))
+    );
+    
+    console.log(`🤖 AI Validation: ${highConfidence.length} high-confidence suggestions passed, ${needValidation.length} need validation`);
+
+    // Validate uncertain suggestions in smaller batches
+    const batchSize = 3; // Reduced from 5 for faster processing
+    for (let i = 0; i < needValidation.length; i += batchSize) {
+      const batch = needValidation.slice(i, i + batchSize);
+      
+      // Run validation in parallel within batch
+      const validationPromises = batch.map(async (suggestion) => {
+        try {
+          const isValid = await this.validateSuggestionWithAI(suggestion, text);
+          if (isValid) {
+            return { ...suggestion, aiValidated: true, confidence: Math.min(suggestion.confidence + 0.15, 1.0) };
+          }
+          return null; // Invalid suggestion
+        } catch (error) {
+          console.warn('AI validation failed, accepting suggestion:', error);
+          return { ...suggestion, aiValidated: false, confidence: Math.max(suggestion.confidence - 0.1, 0.1) };
+        }
+      });
+
+      const batchResults = await Promise.all(validationPromises);
+      validatedSuggestions.push(...batchResults.filter(s => s !== null) as TextSuggestion[]);
+      
+      // Small delay between batches to avoid rate limiting
+      if (i + batchSize < needValidation.length) {
+        await new Promise(resolve => setTimeout(resolve, 50)); // Reduced from 100ms
+      }
+    }
+
+    console.log(`🤖 Smart validation complete: ${validatedSuggestions.length}/${suggestions.length} suggestions accepted`);
+    return validatedSuggestions;
+  }
+
+  /**
+   * 🚀 OPTIMIZED: Enhanced caching with content-aware keys
+   */
+  private getCacheKey(text: string, mode?: string): string {
+    const textHash = this.simpleHash(text);
+    const wordCount = text.trim().split(/\s+/).length;
+    return `analysis-${textHash}-${wordCount}-${mode || 'instant'}`;
+  }
+
+  private simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < Math.min(str.length, 200); i++) { // Only hash first 200 chars for speed
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(36);
   }
 
   /**
@@ -122,7 +323,6 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
     
     // Convert to lowercase for analysis, but preserve original case for replacements
     const lowerText = text.toLowerCase();
-    const words = text.split(/(\s+|[^\w']+)/).filter(word => word.trim().length > 0);
     
     // 🎯 CAPITALIZATION ERRORS
     suggestions.push(...this.checkCapitalization(text));
@@ -510,6 +710,60 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
   }
 
   /**
+   * Check for double spacing and spacing errors
+   */
+  private checkSpacingErrors(text: string): TextSuggestion[] {
+    const suggestions: TextSuggestion[] = [];
+    
+    // Check for double spaces
+    const doubleSpaceRegex = /(\s{2,})/g;
+    let match;
+    
+    while ((match = doubleSpaceRegex.exec(text)) !== null) {
+      // Skip if it's intentional paragraph breaks (more than 3 spaces or contains newlines)
+      const spaceString = match[0];
+      if (spaceString.includes('\n') || spaceString.length > 3) {
+        continue;
+      }
+      
+      suggestions.push({
+        id: `spacing-${Date.now()}-${match.index}`,
+        type: 'punctuation',
+        severity: 'warning',
+        message: 'Remove extra spacing',
+        originalText: spaceString,
+        suggestedText: ' ',
+        startIndex: match.index,
+        endIndex: match.index + spaceString.length,
+        explanation: 'Use single spacing between words and sentences',
+        confidence: 0.95
+      });
+    }
+
+    // Check for space before punctuation
+    const punctuationSpaceRegex = /\s+([.!?,:;])/g;
+    while ((match = punctuationSpaceRegex.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const punctuation = match[1];
+      
+      suggestions.push({
+        id: `punct-spacing-${Date.now()}-${match.index}`,
+        type: 'punctuation',
+        severity: 'error',
+        message: 'Remove space before punctuation',
+        originalText: fullMatch,
+        suggestedText: punctuation,
+        startIndex: match.index,
+        endIndex: match.index + fullMatch.length,
+        explanation: 'Punctuation should not have spaces before it',
+        confidence: 0.9
+      });
+    }
+
+    return suggestions;
+  }
+
+  /**
    * ⚡ INSTANT ANALYSIS: Immediate local checks (0ms delay)
    * Provides instant feedback for basic spelling, grammar, and style issues
    * Perfect for real-time typing feedback
@@ -519,20 +773,27 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       await this.initialize();
     }
 
+    // 🚀 OPTIMIZED: Check cache first
+    const cacheKey = this.getCacheKey(text, 'instant');
+    if (this.analysisCache.has(cacheKey)) {
+      console.log(`⚡ Cache hit for instant analysis`);
+      return this.analysisCache.get(cacheKey)!;
+    }
+
     // Fast analysis without AI - only local checks
-    console.log('⚡ Running instant-only local checks...');
+    console.log('⚡ Running optimized instant-only local checks...');
     
     const words = text.trim().split(/\s+/).filter(word => word.length > 0);
     const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
     
-    // Get instant suggestions
-    const suggestions = await this.getInstantSuggestions(text);
+    // Get instant suggestions (optimized)
+    const suggestions = await this.getOptimizedInstantSuggestions(text);
     console.log(`⚡ Instant analysis: ${suggestions.length} suggestions found`);
     
     // Calculate readability
     const readability = this.calculateReadability(text);
     
-    return {
+    const result = {
       suggestions,
       readabilityScore: readability.score,
       readabilityGrade: readability.grade,
@@ -543,6 +804,19 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       complexWords: this.countComplexWords(words),
       toneAnalysis: undefined
     };
+
+    // 🚀 OPTIMIZED: Cache the result
+    this.analysisCache.set(cacheKey, result);
+    
+    // Keep cache size manageable
+    if (this.analysisCache.size > 50) {
+      const firstKey = this.analysisCache.keys().next().value;
+      if (firstKey) {
+        this.analysisCache.delete(firstKey);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -557,30 +831,60 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
     return this.analyzeTone(text);
   }
 
-  private async getInstantSuggestions(text: string): Promise<TextSuggestion[]> {
+  private async getOptimizedInstantSuggestions(text: string): Promise<TextSuggestion[]> {
     const suggestions: TextSuggestion[] = [];
     const words = text.trim().split(/\s+/).filter(word => word.length > 0);
     const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
     
-    // ⚡ INSTANT LOCAL CHECKS ONLY - No AI calls
-    const localGrammarSuggestions = await this.checkGrammar(text);
-    suggestions.push(...localGrammarSuggestions);
-    
-    const localSpellingSuggestions = await this.checkSpelling(text);
-    suggestions.push(...localSpellingSuggestions);
-    
-    // 🎯 NEW: Context-based homophone and grammar checking
-    const contextBasedSuggestions = this.checkContextBasedErrors(text);
-    suggestions.push(...contextBasedSuggestions);
-    
-    const localStyleSuggestions = await this.checkStyle(text, words, sentences);
-    suggestions.push(...localStyleSuggestions);
+    // 🚀 OPTIMIZED: Run checks in parallel for better performance
+    const checkPromises = [
+      this.checkGrammar(text),
+      this.checkSpelling(text),
+      Promise.resolve(this.checkContextBasedErrors(text)), // Already synchronous
+      this.checkStyle(text, words, sentences),
+      Promise.resolve(this.checkSpacingErrors(text)) // Add spacing check
+    ];
+
+    try {
+      const [
+        localGrammarSuggestions,
+        localSpellingSuggestions, 
+        contextBasedSuggestions,
+        localStyleSuggestions,
+        spacingSuggestions
+      ] = await Promise.all(checkPromises);
+
+      suggestions.push(
+        ...localGrammarSuggestions,
+        ...localSpellingSuggestions,
+        ...contextBasedSuggestions,
+        ...localStyleSuggestions,
+        ...spacingSuggestions
+      );
+
+      console.log(`⚡ Parallel local checks: ${suggestions.length} suggestions found`);
+
+    } catch (error) {
+      console.warn('Some local checks failed, continuing with available results:', error);
+    }
+
+    // 🚀 OPTIMIZED: Early filtering to reduce processing load
+    const filteredSuggestions = suggestions.filter(s => 
+      s.confidence > 0.3 && // Filter out very low confidence suggestions
+      s.originalText.length > 0 && // Ensure valid text ranges
+      s.suggestedText !== s.originalText // Ensure there's actually a change
+    );
 
     // Early deduplication before conflict resolution for better performance
-    const deduplicatedSuggestions = this.removeDuplicateSuggestions(suggestions);
+    const deduplicatedSuggestions = this.removeDuplicateSuggestions(filteredSuggestions);
     
     // Resolve conflicts between overlapping suggestions
     return this.resolveConflictingSuggestions(deduplicatedSuggestions);
+  }
+
+  // Keep the original method for backward compatibility
+  private async getInstantSuggestions(text: string): Promise<TextSuggestion[]> {
+    return this.getOptimizedInstantSuggestions(text);
   }
 
   /**
@@ -625,110 +929,21 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       console.log('⚡ Skipping instant local checks (AI enhancement mode)');
     }
 
-    // 🚀 ENHANCED COMPREHENSIVE AI ANALYSIS - More thorough with lower thresholds
-    if (mode === 'comprehensive' && text.trim().length >= 15) { // Lowered from 30 to 15 characters
+    // 🚀 OPTIMIZED COMPREHENSIVE AI ANALYSIS - Batch processing for better performance
+    if (mode === 'comprehensive' && text.trim().length >= 15) {
       try {
-        console.log('🚀 Starting enhanced comprehensive AI analyses...');
-        
-        // AI Grammar & Clarity Analysis
-        if (text.trim().length >= 15) {
-          try {
-            const grammarResult = await firebaseAIService.analyzeGrammarAndClarity(text);
-            const aiSuggestions = grammarResult.suggestions.map(s => this.convertToTextSuggestion(s));
-            suggestions.push(...aiSuggestions);
-            console.log(`🚀 AI Grammar analysis: ${aiSuggestions.length} suggestions added`);
-          } catch (error) {
-            console.warn('AI Grammar analysis failed:', error);
-          }
-        }
-        
-        // AI Conciseness Analysis
-        if (text.trim().length >= 20) {
-          try {
-            const concisenessResult = await firebaseAIService.analyzeConciseness(text);
-            const concisenessSuggestions = concisenessResult.suggestions.map(s => this.convertToTextSuggestion(s));
-            suggestions.push(...concisenessSuggestions);
-            console.log(`🚀 AI Conciseness analysis: ${concisenessSuggestions.length} suggestions added`);
-          } catch (error) {
-            console.warn('AI Conciseness analysis failed:', error);
-          }
-        }
-        
-        // AI Vocabulary Analysis
-        if (text.trim().length >= 25) {
-          try {
-            const vocabularyResult = await firebaseAIService.analyzeVocabulary(text);
-            const vocabularySuggestions = vocabularyResult.suggestions.map(s => this.convertToTextSuggestion(s));
-            // Filter out overly formal suggestions
-            const filteredVocabSuggestions = vocabularySuggestions.filter(s => 
-              this.isAppropriateVocabularySuggestion(s, text)
-            );
-            suggestions.push(...filteredVocabSuggestions);
-            console.log(`🚀 AI Vocabulary analysis: ${filteredVocabSuggestions.length} suggestions added (${vocabularySuggestions.length - filteredVocabSuggestions.length} filtered out)`);
-          } catch (error) {
-            console.warn('AI Vocabulary analysis failed:', error);
-          }
-        }
-        
-        // AI Goal Alignment Analysis
-        if (writingGoal && text.trim().length >= 50) {
-          try {
-            const goalResult = await firebaseAIService.analyzeGoalAlignment(text, writingGoal);
-            const goalSuggestions = goalResult.suggestions.map(s => this.convertToTextSuggestion(s));
-            suggestions.push(...goalSuggestions);
-            console.log(`🚀 AI Goal alignment analysis: ${goalSuggestions.length} suggestions added`);
-          } catch (error) {
-            console.warn('AI Goal alignment analysis failed:', error);
-          }
-        }
-        
+        // Use new batch AI analysis for better performance
+        const aiSuggestions = await this.batchAIAnalysis(text, writingGoal);
+        suggestions.push(...aiSuggestions);
+        console.log(`🚀 Batch AI analysis complete: ${aiSuggestions.length} total suggestions`);
       } catch (error) {
-        console.warn('Comprehensive AI analysis failed:', error);
+        console.warn('Batch AI analysis failed:', error);
       }
     }
 
-    // 🚀 PHASE 2: AI VALIDATION OF SUGGESTIONS
-    console.log('🤖 Starting AI validation of suggestions...');
-    const validatedSuggestions: TextSuggestion[] = [];
-    
-    // Validate suggestions in batches to avoid overwhelming the AI
-    const batchSize = 5;
-    for (let i = 0; i < suggestions.length; i += batchSize) {
-      const batch = suggestions.slice(i, i + batchSize);
-      
-      // Validate each suggestion in the batch
-      for (const suggestion of batch) {
-        // Skip AI validation for high-confidence suggestions or if text is too short
-        if (suggestion.confidence >= 0.9 || text.length < 20) {
-          suggestion.aiValidated = false; // Mark as not AI validated
-          validatedSuggestions.push(suggestion);
-          continue;
-        }
-        
-        try {
-          const isValid = await this.validateSuggestionWithAI(suggestion, text);
-          if (isValid) {
-            suggestion.aiValidated = true;
-            suggestion.confidence = Math.min(suggestion.confidence + 0.1, 1.0); // Boost confidence for AI-validated suggestions
-            validatedSuggestions.push(suggestion);
-          } else {
-            console.log(`🤖 Rejected invalid suggestion: ${suggestion.originalText} -> ${suggestion.suggestedText}`);
-          }
-      } catch (error) {
-          console.warn('AI validation failed for suggestion, including anyway:', error);
-          suggestion.aiValidated = false;
-          suggestion.confidence = Math.max(suggestion.confidence - 0.1, 0.1); // Lower confidence for unvalidated suggestions
-          validatedSuggestions.push(suggestion);
-        }
-      }
-      
-      // Add a small delay between batches to avoid rate limiting
-      if (i + batchSize < suggestions.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-
-    console.log(`🤖 AI Validation complete: ${validatedSuggestions.length}/${suggestions.length} suggestions validated`);
+    // 🚀 OPTIMIZED AI VALIDATION - Smart validation based on confidence
+    console.log('🤖 Starting smart AI validation...');
+    const validatedSuggestions = await this.smartValidateAI(suggestions, text);
 
     // Final deduplication and conflict resolution
     const finalSuggestions = this.resolveConflictingSuggestions(
@@ -1613,7 +1828,9 @@ Is this suggestion correct and helpful? Respond with only "YES" or "NO" followed
       const typePriority = {
         'spelling': 100,      // Highest - spelling errors are critical
         'grammar': 80,        // High - but lower than spelling
+        'punctuation': 75,    // High - like grammar
         'vocabulary': 60,     // Medium-High (specific word changes)
+        'clarity': 50,        // Medium - clarity improvements
         'conciseness': 40,    // Medium (reduced to allow more coexistence)
         'style': 30,          // Lower (often subjective)
         'goal-alignment': 10, // Lowest (very broad, sentence-level)

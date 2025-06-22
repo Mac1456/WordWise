@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDocumentStore } from '../stores/documentStore'
 import { textAnalysisService, TextAnalysis, TextSuggestion } from '../services/textAnalysisService'
+import { firebaseAIService } from '../services/firebaseAIService'
 import { ExportService } from '../services/exportService'
 import HighlightedTextArea from './HighlightedTextArea'
 import ToneAnalysisPanel from './ToneAnalysisPanel'
@@ -51,6 +52,12 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const [isRunningToneAnalysis, setIsRunningToneAnalysis] = useState(false)
   const [showExportDropdown, setShowExportDropdown] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set())
+  const [appliedSuggestions, setAppliedSuggestions] = useState<Set<string>>(new Set())
+  const [isApplyingSuggestion, setIsApplyingSuggestion] = useState(false)
+  const [suggestionIgnoreCount, setSuggestionIgnoreCount] = useState<Map<string, number>>(new Map())
+  const [permanentlyBlockedSuggestions, setPermanentlyBlockedSuggestions] = useState<Set<string>>(new Set())
+  const [lastAnalysisSuggestions, setLastAnalysisSuggestions] = useState<Set<string>>(new Set())
 
   console.log('WritingEditor: State initialized')
 
@@ -76,34 +83,79 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         if (doc) {
           setCurrentDocument(doc)
           setContent(doc.content || '')
+          // Clear dismissed suggestions and blocked suggestions when loading new document
+          setDismissedSuggestions(new Set())
+          setSuggestionIgnoreCount(new Map())
+          setPermanentlyBlockedSuggestions(new Set())
+          setLastAnalysisSuggestions(new Set())
           console.log('WritingEditor: Document loaded successfully')
         }
       })
     }
   }, [documentId, loadDocuments, setCurrentDocument])
 
-  // Debounced analysis effect
+  // 🚀 OPTIMIZED: Adaptive debounced analysis with smart timing
   useEffect(() => {
     if (!content.trim()) {
       setAnalysis(null)
       return
     }
 
+    // Skip auto-analysis if we're currently applying a suggestion
+    if (isApplyingSuggestion) {
+      console.log('WritingEditor: Skipping auto-analysis - applying suggestion')
+      return
+    }
+
+    // Adaptive delay based on content length and changes
+    const getAnalysisDelay = () => {
+      const contentLength = content.length
+      const wordCount = content.trim().split(/\s+/).length
+      
+      // Shorter delay for shorter content, longer for complex text
+      if (contentLength < 100) return 500 // Quick response for short text
+      if (wordCount < 50) return 750      // Medium delay for medium text  
+      return 1000                         // Standard delay for longer text
+    }
+
     const timeoutId = setTimeout(async () => {
       if (content.trim().length < 10) return
+      if (isApplyingSuggestion) {
+        console.log('WritingEditor: Skipping auto-analysis - applying suggestion')
+        return
+      }
 
       setIsAutoAnalyzing(true)
       try {
-        console.log('WritingEditor: Starting auto-analysis')
+        console.log('WritingEditor: Starting optimized auto-analysis')
+        const startTime = performance.now()
+        
         const result = await textAnalysisService.analyzeTextInstant(content)
+        
+        // Filter out dismissed and permanently blocked suggestions from auto-analysis results
+        if (result && result.suggestions) {
+          const originalCount = result.suggestions.length
+          const filteredSuggestions = result.suggestions.filter(suggestion => {
+            const contentKey = getSuggestionContentKey(suggestion)
+            return !dismissedSuggestions.has(suggestion.id) && 
+                   !permanentlyBlockedSuggestions.has(contentKey)
+          })
+          result.suggestions = filteredSuggestions
+          if (originalCount > filteredSuggestions.length) {
+            console.log(`WritingEditor: Filtered ${originalCount - filteredSuggestions.length} dismissed/blocked suggestions from auto-analysis`)
+          }
+        }
+        
         setAnalysis(result)
-        console.log('WritingEditor: Auto-analysis completed')
+        
+        const endTime = performance.now()
+        console.log(`WritingEditor: Auto-analysis completed in ${Math.round(endTime - startTime)}ms`)
       } catch (error) {
         console.error('WritingEditor: Auto-analysis failed:', error)
       } finally {
         setIsAutoAnalyzing(false)
       }
-    }, 1000)
+    }, getAnalysisDelay())
 
     return () => clearTimeout(timeoutId)
   }, [content])
@@ -177,22 +229,185 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
     }
   }
 
-  const applySuggestion = (suggestion: TextSuggestion) => {
-    console.log('WritingEditor: Applying suggestion:', suggestion.type)
-    const beforeText = content.slice(0, suggestion.startIndex)
-    const afterText = content.slice(suggestion.endIndex)
-    const newContent = beforeText + suggestion.suggestedText + afterText
+  const applySuggestion = (suggestion: TextSuggestion, alternativeText?: string) => {
+    const textToApply = alternativeText || suggestion.suggestedText
+    console.log('WritingEditor: Applying suggestion:', suggestion.type, `"${suggestion.originalText}" → "${textToApply}"`)
     
-    setContent(newContent)
+    // Set flag to prevent auto-analysis during suggestion application
+    setIsApplyingSuggestion(true)
     
-    if (analysis) {
-      const updatedSuggestions = analysis.suggestions.filter(s => s.id !== suggestion.id)
-      setAnalysis({ ...analysis, suggestions: updatedSuggestions })
+    try {
+      // Enhanced position validation with multiple fallback strategies
+      let startIndex = suggestion.startIndex
+      let endIndex = suggestion.endIndex
+      let currentText = content.slice(startIndex, endIndex)
+      
+      if (currentText !== suggestion.originalText) {
+        console.warn('WritingEditor: Suggestion text mismatch, attempting to locate...')
+        
+        // Strategy 1: Search in a wider area around the original position
+        const searchRadius = 100
+        const searchStart = Math.max(0, startIndex - searchRadius)
+        const searchEnd = Math.min(content.length, endIndex + searchRadius)
+        const searchArea = content.slice(searchStart, searchEnd)
+        let foundIndex = searchArea.indexOf(suggestion.originalText)
+        
+        if (foundIndex !== -1) {
+          startIndex = searchStart + foundIndex
+          endIndex = startIndex + suggestion.originalText.length
+          console.log('WritingEditor: Position corrected using wide search to:', startIndex, '-', endIndex)
+        } else {
+          // Strategy 2: Try case-insensitive search
+          const lowerOriginal = suggestion.originalText.toLowerCase()
+          const lowerSearchArea = searchArea.toLowerCase()
+          foundIndex = lowerSearchArea.indexOf(lowerOriginal)
+          
+          if (foundIndex !== -1) {
+            startIndex = searchStart + foundIndex
+            endIndex = startIndex + suggestion.originalText.length
+            console.log('WritingEditor: Position corrected using case-insensitive search to:', startIndex, '-', endIndex)
+          } else {
+            // Strategy 3: Try finding first occurrence in entire text
+            foundIndex = content.indexOf(suggestion.originalText)
+            if (foundIndex !== -1) {
+              startIndex = foundIndex
+              endIndex = startIndex + suggestion.originalText.length
+              console.log('WritingEditor: Position corrected using full text search to:', startIndex, '-', endIndex)
+            } else {
+              // Strategy 4: Try partial matching (first few words)
+              const words = suggestion.originalText.split(' ')
+              if (words.length > 1) {
+                const partialText = words.slice(0, Math.ceil(words.length / 2)).join(' ')
+                foundIndex = content.indexOf(partialText)
+                if (foundIndex !== -1) {
+                  startIndex = foundIndex
+                  endIndex = startIndex + suggestion.originalText.length
+                  console.log('WritingEditor: Position corrected using partial match to:', startIndex, '-', endIndex)
+                } else {
+                  console.error('WritingEditor: Cannot locate suggestion text anywhere, skipping application')
+                  return
+                }
+              } else {
+                console.error('WritingEditor: Cannot locate suggestion text, skipping application')
+                return
+              }
+            }
+          }
+        }
+      }
+      
+      const beforeText = content.slice(0, startIndex)
+      const afterText = content.slice(endIndex)
+      const newContent = beforeText + textToApply + afterText
+      
+      setContent(newContent)
+      
+      if (analysis) {
+        // Calculate the change in text length
+        const lengthDiff = textToApply.length - suggestion.originalText.length
+        
+        // Remove the applied suggestion and adjust positions of remaining suggestions
+        const updatedSuggestions = analysis.suggestions
+          .filter(s => s.id !== suggestion.id)
+          .map(s => {
+            // Only adjust suggestions that come after the applied suggestion
+            if (s.startIndex > endIndex) {
+              return {
+                ...s,
+                startIndex: s.startIndex + lengthDiff,
+                endIndex: s.endIndex + lengthDiff
+              }
+            }
+            return s
+          })
+        
+        setAnalysis({ ...analysis, suggestions: updatedSuggestions })
+        console.log('WritingEditor: Remaining suggestions after applying:', updatedSuggestions.length)
+      }
+    } finally {
+      // Re-enable auto-analysis after a short delay to let things settle
+      setTimeout(() => {
+        setIsApplyingSuggestion(false)
+        console.log('WritingEditor: Re-enabled auto-analysis')
+      }, 1500) // 1.5 second delay to prevent immediate re-analysis
     }
+  }
+
+  // Generate a content-based key for tracking suggestions across analysis runs
+  const getSuggestionContentKey = (suggestion: TextSuggestion): string => {
+    return `${suggestion.type}:${suggestion.originalText}→${suggestion.suggestedText}`
+  }
+
+  // Track ignored suggestions when running fresh AI analysis
+  const trackIgnoredSuggestions = () => {
+    if (!analysis?.suggestions) return
+
+    // For each suggestion from the last analysis that wasn't applied
+    analysis.suggestions.forEach(suggestion => {
+      const contentKey = getSuggestionContentKey(suggestion)
+      
+      // If this suggestion wasn't applied (not in appliedSuggestions), count it as ignored
+      if (!appliedSuggestions.has(suggestion.id)) {
+        setSuggestionIgnoreCount(prev => {
+          const newMap = new Map(prev)
+          const currentCount = newMap.get(contentKey) || 0
+          const newCount = currentCount + 1
+          newMap.set(contentKey, newCount)
+          
+          console.log(`WritingEditor: Suggestion "${contentKey}" ignored ${newCount} time(s)`)
+          
+          // If ignored twice, permanently block it
+          if (newCount >= 2) {
+            setPermanentlyBlockedSuggestions(prevBlocked => {
+              const newBlocked = new Set([...prevBlocked, contentKey])
+              console.log(`WritingEditor: Permanently blocking suggestion "${contentKey}" after ${newCount} ignores`)
+              return newBlocked
+            })
+          }
+          
+          return newMap
+        })
+      }
+    })
   }
 
   const dismissSuggestion = (suggestionId: string) => {
     console.log('WritingEditor: Dismissing suggestion:', suggestionId)
+    
+    // Find the suggestion to get its content key
+    const suggestion = analysis?.suggestions.find(s => s.id === suggestionId)
+    if (suggestion) {
+      const contentKey = getSuggestionContentKey(suggestion)
+      
+      // Increment ignore count for this content-based suggestion (dismissing counts as ignoring)
+      setSuggestionIgnoreCount(prev => {
+        const newMap = new Map(prev)
+        const currentCount = newMap.get(contentKey) || 0
+        const newCount = currentCount + 1
+        newMap.set(contentKey, newCount)
+        
+        console.log(`WritingEditor: Suggestion "${contentKey}" dismissed/ignored ${newCount} time(s)`)
+        
+        // If dismissed/ignored twice, permanently block it
+        if (newCount >= 2) {
+          setPermanentlyBlockedSuggestions(prevBlocked => {
+            const newBlocked = new Set([...prevBlocked, contentKey])
+            console.log(`WritingEditor: Permanently blocking suggestion "${contentKey}" after ${newCount} dismissals/ignores`)
+            return newBlocked
+          })
+        }
+        
+        return newMap
+      })
+    }
+    
+    // Track dismissed suggestion to prevent reappearance in current session
+    setDismissedSuggestions(prev => new Set([...prev, suggestionId]))
+    
+    // Clear content-specific cache entries to prevent dismissed suggestions from reappearing
+    textAnalysisService.clearAnalysisCache(content)
+    firebaseAIService.clearCache(content)
+    
     if (analysis) {
       const updatedSuggestions = analysis.suggestions.filter(s => s.id !== suggestionId)
       setAnalysis({ ...analysis, suggestions: updatedSuggestions })
@@ -238,12 +453,41 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   const handleManualAIAnalysis = async () => {
     if (!content.trim()) return
     
-    console.log('WritingEditor: Starting manual AI analysis')
+    console.log('WritingEditor: Starting manual AI analysis (refresh mode)')
     setIsAnalyzing(true)
+    
     try {
+      // Track ignored suggestions from the previous analysis before clearing
+      trackIgnoredSuggestions()
+      
+      // Clear current suggestions and dismissed suggestions for a fresh start
+      // Keep permanently blocked suggestions to respect user's permanent dismissals/ignores
+      console.log('WritingEditor: Clearing all suggestions for fresh analysis')
+      setDismissedSuggestions(new Set())
+      setAnalysis(null)
+      
+      // Clear both caches to force fresh AI analysis
+      textAnalysisService.clearAnalysisCache()
+      firebaseAIService.clearCache()
+      
+      // Get fresh analysis and filter out permanently blocked suggestions
       const result = await textAnalysisService.analyzeText(content)
+      
+      // Filter out permanently blocked suggestions even in refresh mode
+      if (result && result.suggestions) {
+        const originalCount = result.suggestions.length
+        const filteredSuggestions = result.suggestions.filter(suggestion => {
+          const contentKey = getSuggestionContentKey(suggestion)
+          return !permanentlyBlockedSuggestions.has(contentKey)
+        })
+        result.suggestions = filteredSuggestions
+        if (originalCount > filteredSuggestions.length) {
+          console.log(`WritingEditor: Filtered ${originalCount - filteredSuggestions.length} permanently blocked suggestions from refresh`)
+        }
+      }
+      
       setAnalysis(result)
-      console.log('WritingEditor: Manual AI analysis completed')
+      console.log('WritingEditor: Manual AI analysis completed with fresh suggestions')
     } catch (error) {
       console.error('WritingEditor: Manual AI analysis failed:', error)
     } finally {
@@ -360,6 +604,13 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
   
   const words = content.trim().split(/\s+/).filter(word => word.length > 0)
   const wordCount = analysis?.wordCount || words.length
+  
+  // Filter suggestions for display and highlighting (filter dismissed and permanently blocked)
+  const filteredSuggestions = analysis?.suggestions?.filter(suggestion => {
+    const contentKey = getSuggestionContentKey(suggestion)
+    return !dismissedSuggestions.has(suggestion.id) && 
+           !permanentlyBlockedSuggestions.has(contentKey)
+  }) || []
 
   return (
     <div className="h-full flex bg-gray-50">
@@ -459,7 +710,7 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
           <HighlightedTextArea
             value={content}
             onChange={handleContentChange}
-            suggestions={analysis?.suggestions || []}
+            suggestions={filteredSuggestions}
             onSuggestionClick={(suggestion, element) => {
               console.log('WritingEditor: Suggestion clicked:', suggestion.id)
               const rect = element.getBoundingClientRect()
@@ -485,15 +736,15 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
                 onClick={handleManualAIAnalysis}
                 disabled={isAutoAnalyzing || isAnalyzing}
                 className="p-2 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 disabled:opacity-50"
-                title="Run AI Analysis"
+                title="Get Fresh AI Suggestions (ignores unapplied suggestions, permanently blocks after 2 ignores)"
               >
                 <Zap size={14} />
               </button>
               <button
                 onClick={applyAllSuggestions}
-                disabled={!analysis?.suggestions?.length}
+                disabled={!filteredSuggestions.length}
                 className="p-2 bg-green-100 text-green-700 rounded-full hover:bg-green-200 disabled:opacity-50"
-                title={`Apply All ${analysis?.suggestions?.length || 0} Suggestions`}
+                title={`Apply All ${filteredSuggestions.length} Suggestions`}
               >
                 <CheckCheck size={14} />
               </button>
@@ -502,9 +753,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
-          {analysis?.suggestions?.length ? (
+          {filteredSuggestions.length ? (
             <div className="space-y-3">
-              {analysis.suggestions.map((suggestion) => (
+              {filteredSuggestions.map((suggestion) => (
                 <SuggestionCard key={suggestion.id} suggestion={suggestion} />
               ))}
             </div>
@@ -532,9 +783,9 @@ export default function WritingEditor({ documentId }: WritingEditorProps) {
         <SuggestionTooltip
           suggestion={selectedSuggestion}
           position={tooltipPosition}
-          onApply={() => {
-            console.log('WritingEditor: Applying suggestion from tooltip')
-            if (selectedSuggestion) applySuggestion(selectedSuggestion)
+          onApply={(alternativeText?: string) => {
+            console.log('WritingEditor: Applying suggestion from tooltip', alternativeText ? `(alternative: ${alternativeText})` : '')
+            if (selectedSuggestion) applySuggestion(selectedSuggestion, alternativeText)
             setSelectedSuggestion(null)
             setTooltipPosition(null)
           }}
